@@ -44,9 +44,14 @@ async function Dashboard() {
           <h1 className="font-display text-3xl font-semibold leading-tight sm:text-4xl">Results</h1>
           <p className="mt-1 text-sm text-muted">Signed in as {organiser.name}. Every change is logged with your name.</p>
         </div>
-        <form action={logout}>
-          <button className="rounded-md border border-line px-3 py-1.5 text-sm hover:border-muted">Sign out</button>
-        </form>
+        <div className="flex gap-2">
+          <Link href="/admin/contacts" className="rounded-md border border-line px-3 py-1.5 text-sm hover:border-muted">
+            Team contacts
+          </Link>
+          <form action={logout}>
+            <button className="rounded-md border border-line px-3 py-1.5 text-sm hover:border-muted">Sign out</button>
+          </form>
+        </div>
       </div>
 
       {firstOpenDay && (

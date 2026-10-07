@@ -1,5 +1,6 @@
-// SJC Sports Fest cricket. Player names only as typed by scorers (organiser screens only, never public).
-// Never store Emirates IDs, phones or emails, and never import from the registration masterfile.
+// SJC Sports Fest cricket. Public pages show team names only. Organiser-only data: player names
+// and gender, and each team captain's contact details (for reaching teams).
+// Never store Emirates IDs, parish registration numbers or ages.
 
 generator client {
   provider = "prisma-client-js"
@@ -34,6 +35,11 @@ model Team {
   group   String // "A".."D"
   drawPos Int // position in the group draw, final tie-break
 
+  // From the registration form. Organiser screens only.
+  captainName  String?
+  captainPhone String?
+  captainEmail String?
+
   matchesAsTeam1 Match[] @relation("team1")
   matchesAsTeam2 Match[] @relation("team2")
   matchesWon     Match[] @relation("winner")
@@ -46,6 +52,8 @@ model Player {
   teamId    Int
   team      Team     @relation(fields: [teamId], references: [id])
   name      String
+  // From the registration form when known; null for players first added at the ground.
+  female    Boolean?
   createdAt DateTime @default(now())
 
   @@unique([teamId, name])

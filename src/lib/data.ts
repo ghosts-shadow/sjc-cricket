@@ -42,7 +42,11 @@ export async function getTournament(): Promise<Tournament> {
   cacheTag(TOURNAMENT_TAG);
 
   const [teamRows, matchRows] = await Promise.all([
-    prisma.team.findMany({ orderBy: [{ group: "asc" }, { drawPos: "asc" }] }),
+    // Public fields only: captain contacts must never reach this cached, public data.
+    prisma.team.findMany({
+      select: { id: true, name: true, slug: true, group: true, drawPos: true },
+      orderBy: [{ group: "asc" }, { drawPos: "asc" }],
+    }),
     prisma.match.findMany({ orderBy: [{ startsAt: "asc" }, { matchNo: "asc" }] }),
   ]);
 
