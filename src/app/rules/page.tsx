@@ -60,7 +60,7 @@ export default function RulesPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-display text-4xl font-bold leading-none sm:text-5xl">Rules at a glance</h1>
+        <h1 className="font-display text-3xl font-semibold leading-tight sm:text-4xl">Rules at a glance</h1>
         <p className="mt-1 text-sm text-muted">
           A summary of the SJC Sports Fest cricket rules (revised 20 Sep 2026). The organisers&apos; full rules document
           and the umpire&apos;s decision take precedence.

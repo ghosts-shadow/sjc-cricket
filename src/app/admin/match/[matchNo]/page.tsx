@@ -45,7 +45,7 @@ async function MatchAdmin({ params }: { params: PageProps<"/admin/match/[matchNo
         <Link href={`/admin#match-${matchNo}`} className="text-sm underline underline-offset-2">
           ← All matches
         </Link>
-        <h1 className="mt-2 font-display text-4xl font-bold leading-none sm:text-5xl">{match.label}</h1>
+        <h1 className="mt-2 font-display text-3xl font-semibold leading-tight sm:text-4xl">{match.label}</h1>
         <p className="mt-1 text-sm text-muted">
           {formatLongDay(match.startsAt)} · {formatTime(match.startsAt)}
         </p>

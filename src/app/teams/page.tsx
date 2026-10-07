@@ -10,7 +10,7 @@ export default async function TeamsPage() {
   const { teams } = await getTournament();
   return (
     <div className="space-y-6">
-      <h1 className="font-display text-4xl font-bold leading-none sm:text-5xl">Teams</h1>
+      <h1 className="font-display text-3xl font-semibold leading-tight sm:text-4xl">Teams</h1>
       <div className="grid gap-4 sm:grid-cols-2">
         {GROUPS.map((g) => (
           <section key={g} className="rounded-lg border border-line bg-card p-3 shadow-sm">

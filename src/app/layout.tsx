@@ -1,19 +1,16 @@
 import type { Metadata, Viewport } from "next";
-import { Barlow_Condensed, IBM_Plex_Sans } from "next/font/google";
+import { Inter } from "next/font/google";
 import Link from "next/link";
+import { Suspense } from "react";
+import { Nav, NavList } from "@/components/nav";
 import "./globals.css";
 
-// Same type pairing as the SJC Sportsfest 2026 schedule.
-const plex = IBM_Plex_Sans({
-  variable: "--font-plex",
+// Inter is the closest free match for Linear's typeface. The opsz axis gives
+// headings the tighter display cut and body text the text cut.
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
-  weight: ["400", "500", "600"],
-});
-
-const barlow = Barlow_Condensed({
-  variable: "--font-barlow",
-  subsets: ["latin"],
-  weight: ["500", "600", "700"],
+  axes: ["opsz"],
 });
 
 export const metadata: Metadata = {
@@ -22,50 +19,68 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
-    { media: "(prefers-color-scheme: dark)", color: "#151d25" },
-  ],
+  themeColor: "#010102",
 };
 
-const NAV = [
-  { href: "/", label: "Home" },
-  { href: "/standings", label: "Standings" },
-  { href: "/fixtures", label: "Fixtures" },
-  { href: "/bracket", label: "Knockouts" },
-  { href: "/teams", label: "Teams" },
-  { href: "/rules", label: "Rules" },
-];
+/** Logo and name. `stacked` puts the logo above the text so it fits the sidebar's width. */
+function Brand({ stacked = false }: { stacked?: boolean }) {
+  return (
+    <Link href="/" className={`flex gap-3 ${stacked ? "flex-col items-start" : "items-center"}`}>
+      <span className="grid size-9 shrink-0 place-items-center rounded-md bg-accent text-[11px] font-semibold tracking-wide text-white">
+        SJC
+      </span>
+      <span className="leading-tight">
+        <span className="block text-[11px] font-medium uppercase tracking-[.08em] text-muted">St. Joseph&apos;s Cathedral</span>
+        <span className="block font-semibold tracking-[-0.01em]">
+          Sports Fest <span className={`text-ink-muted ${stacked ? "block" : ""}`}>Cricket 2026</span>
+        </span>
+      </span>
+    </Link>
+  );
+}
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${plex.variable} ${barlow.variable} h-full antialiased`}>
-      <body className="flex min-h-full flex-col font-sans">
-        <header className="border-b border-line bg-card">
-          <div className="mx-auto max-w-5xl px-4 pt-4">
-            <p className="text-xs font-semibold uppercase tracking-[.12em] text-muted">St. Joseph&apos;s Cathedral · Abu Dhabi</p>
-            <Link href="/" className="mt-1 inline-flex items-baseline gap-2 font-display leading-none">
-              <span className="text-3xl font-bold">SJC Sports Fest</span>
-              <span className="text-xl font-semibold text-cricket">Cricket 2026</span>
+    <html lang="en" className={`${inter.variable} h-full antialiased`}>
+      <body className="flex min-h-full flex-col font-sans lg:pl-64">
+        {/* Desktop: fixed sidebar, like Linear's app. */}
+        <aside className="fixed inset-y-0 left-0 hidden w-64 flex-col border-r border-line bg-background lg:flex">
+          <div className="px-6 pb-6 pt-7">
+            <Brand stacked />
+          </div>
+          <nav aria-label="Main">
+            <Suspense fallback={<NavList variant="side" pathname={null} />}>
+              <Nav variant="side" />
+            </Suspense>
+          </nav>
+          <div className="mt-auto border-t border-line p-4">
+            <Link
+              href="/admin"
+              className="block rounded-md border border-line bg-card px-3.5 py-2 text-center text-sm font-medium hover:bg-soft"
+            >
+              Organiser sign in
             </Link>
           </div>
-          <nav className="mx-auto max-w-5xl overflow-x-auto px-2 pb-1">
-            <ul className="flex gap-1 whitespace-nowrap text-sm">
-              {NAV.map((item) => (
-                <li key={item.href}>
-                  <Link href={item.href} className="block rounded-md px-2 py-2 text-muted hover:bg-soft hover:text-foreground">
-                    {item.label}
-                  </Link>
-                </li>
-              ))}
-            </ul>
+        </aside>
+
+        {/* Phone and tablet: brand bar with a scrollable row of pills. */}
+        <header className="border-b border-line bg-background lg:hidden">
+          <div className="px-4 pb-3 pt-4">
+            <Brand />
+          </div>
+          <nav aria-label="Main">
+            <Suspense fallback={<NavList variant="bar" pathname={null} />}>
+              <Nav variant="bar" />
+            </Suspense>
           </nav>
         </header>
-        <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6">{children}</main>
+
+        <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6 lg:px-8 lg:py-10">{children}</main>
+
         <footer className="border-t border-line">
-          <div className="mx-auto max-w-5xl px-4 py-4 text-xs text-muted">
+          <div className="mx-auto max-w-5xl px-4 py-5 text-xs text-muted lg:px-8">
             St. Joseph&apos;s Cathedral Sports Fest · All times UAE ·{" "}
-            <Link href="/admin" className="underline underline-offset-2">
+            <Link href="/admin" className="underline underline-offset-2 hover:text-foreground">
               Organisers
             </Link>
           </div>

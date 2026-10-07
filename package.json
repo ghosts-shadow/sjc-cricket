@@ -12,6 +12,7 @@
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
     "organiser:add": "tsx scripts/add-organiser.ts",
+    "organiser:add:prod": "tsx --env-file=.env.neon scripts/add-organiser.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {

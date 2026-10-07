@@ -1,70 +1,38 @@
 @import "tailwindcss";
 
-/* Palette shared with the SJC Sportsfest 2026 combined schedule. */
+/*
+ * Linear-style dark system: near-black canvas, a surface ladder with hairline
+ * borders instead of shadows, and one lavender accent kept for the brand mark,
+ * primary buttons, focus and link emphasis. Dark only.
+ * Group and scoring colours come from Linear's in-app label palette.
+ */
 :root {
-  color-scheme: light;
-  --ground: #edf0f3;
-  --surface: #ffffff;
-  --ink: #111a24;
-  --muted: #5a6774;
-  --line: #d6dce2;
-  --soft: #f5f7f9;
-  /* Sport colours: basketball, cricket, volleyball, football. Cricket green is this site's accent. */
-  --bb: #c4531c;
-  --cr: #2b7747;
-  --vb: #2a61a6;
-  --fb: #7b3c9e;
-  --bb-t: #fbede5;
-  --cr-t: #e6f2ea;
-  --vb-t: #e6eef8;
-  --fb-t: #f2e9f7;
-  --clash: #b3261e;
-  --clash-t: #fcebea;
-  --focus: #2a61a6;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    color-scheme: dark;
-    --ground: #0e141a;
-    --surface: #151d25;
-    --ink: #e6ebf0;
-    --muted: #95a3b0;
-    --line: #26323e;
-    --soft: #1b242e;
-    --bb: #f08a55;
-    --cr: #62c18a;
-    --vb: #72a5ec;
-    --fb: #c08be0;
-    --bb-t: #3a2216;
-    --cr-t: #16301f;
-    --vb-t: #172a42;
-    --fb-t: #2c1c38;
-    --clash: #ff8a80;
-    --clash-t: #3a1a18;
-    --focus: #72a5ec;
-  }
-}
-
-:root[data-theme="dark"] {
   color-scheme: dark;
-  --ground: #0e141a;
-  --surface: #151d25;
-  --ink: #e6ebf0;
-  --muted: #95a3b0;
-  --line: #26323e;
-  --soft: #1b242e;
-  --bb: #f08a55;
-  --cr: #62c18a;
-  --vb: #72a5ec;
-  --fb: #c08be0;
-  --bb-t: #3a2216;
-  --cr-t: #16301f;
-  --vb-t: #172a42;
-  --fb-t: #2c1c38;
-  --clash: #ff8a80;
-  --clash-t: #3a1a18;
-  --focus: #72a5ec;
+  accent-color: #5e6ad2;
+  --ground: #010102;
+  --surface: #0f1011;
+  --soft: #141516;
+  --raised: #18191a;
+  --ink: #f7f8f8;
+  --ink-muted: #d0d6e0;
+  --muted: #8a8f98;
+  --line: #23252a;
+  --edge: #34343a;
+  --accent: #5e6ad2;
+  --accent-hover: #828fff;
+  --accent-t: rgb(94 106 210 / 0.16);
+  --success: #27a644;
+  --success-t: rgb(39 166 68 / 0.16);
+  --red: #eb5757;
+  --red-t: rgb(235 87 87 / 0.16);
+  --orange: #f2994a;
+  --orange-t: rgb(242 153 74 / 0.15);
+  --blue: #4ea7fc;
+  --blue-t: rgb(78 167 252 / 0.15);
+  --green: #4cb782;
+  --green-t: rgb(76 183 130 / 0.15);
+  --purple: #bb87fc;
+  --purple-t: rgb(187 135 252 / 0.15);
 }
 
 @theme inline {
@@ -72,29 +40,40 @@
   --color-foreground: var(--ink);
   --color-card: var(--surface);
   --color-soft: var(--soft);
+  --color-raised: var(--raised);
   --color-muted: var(--muted);
+  --color-ink-muted: var(--ink-muted);
   --color-line: var(--line);
-  --color-cricket: var(--cr);
-  --color-cricket-tint: var(--cr-t);
-  --color-warn: var(--bb);
-  --color-warn-tint: var(--bb-t);
-  --color-danger: var(--clash);
-  --color-danger-tint: var(--clash-t);
-  --color-focus: var(--focus);
-  --color-win: var(--cr);
-  --color-loss: var(--clash);
-  --color-qualify: var(--cr-t);
-  /* Groups use the four sport colours: A orange, B purple, C green, D blue. */
-  --color-group-a: var(--bb);
-  --color-group-a-tint: var(--bb-t);
-  --color-group-b: var(--fb);
-  --color-group-b-tint: var(--fb-t);
-  --color-group-c: var(--cr);
-  --color-group-c-tint: var(--cr-t);
-  --color-group-d: var(--vb);
-  --color-group-d-tint: var(--vb-t);
-  --font-sans: var(--font-plex), system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-display: var(--font-barlow), "Arial Narrow", Arial, sans-serif;
+  --color-edge: var(--edge);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-cricket: var(--accent);
+  --color-cricket-tint: var(--accent-t);
+  --color-warn: var(--orange);
+  --color-warn-tint: var(--orange-t);
+  --color-danger: var(--red);
+  --color-danger-tint: var(--red-t);
+  --color-focus: var(--accent);
+  --color-win: var(--success);
+  --color-win-tint: var(--success-t);
+  --color-loss: var(--red);
+  --color-qualify: rgb(39 166 68 / 0.08);
+  /* Groups: A orange, B blue, C green, D purple. */
+  --color-group-a: var(--orange);
+  --color-group-a-tint: var(--orange-t);
+  --color-group-b: var(--blue);
+  --color-group-b-tint: var(--blue-t);
+  --color-group-c: var(--green);
+  --color-group-c-tint: var(--green-t);
+  --color-group-d: var(--purple);
+  --color-group-d-tint: var(--purple-t);
+  --font-sans: var(--font-inter), "SF Pro Display", -apple-system, system-ui, "Segoe UI", sans-serif;
+  --font-display: var(--font-inter), "SF Pro Display", -apple-system, system-ui, "Segoe UI", sans-serif;
+  /* 8px controls, 12px cards. Depth comes from the surface ladder, not drop shadows:
+     shadow-sm is only the faint top-edge highlight Linear puts on lifted panels. */
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --shadow-sm: inset 0 1px 0 0 rgb(255 255 255 / 0.04);
 }
 
 body {
@@ -102,8 +81,13 @@ body {
   color: var(--ink);
 }
 
+/* Display type pulls tight, as in Linear's headlines. */
+.font-display {
+  letter-spacing: -0.02em;
+}
+
 :focus-visible {
-  outline: 2px solid var(--focus);
+  outline: 2px solid rgb(94 105 209 / 0.5);
   outline-offset: 2px;
 }
 

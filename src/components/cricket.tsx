@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { MatchView } from "@/lib/data";
-import { dayKey, formatLongDay, formatTime } from "@/lib/format";
+import { dayKey, formatDay, formatLongDay, formatTime } from "@/lib/format";
 import { formatNrr, QUALIFIERS_PER_GROUP, type StandingRow, type TeamLite } from "@/lib/tournament";
 
 const GROUP_COLOURS: Record<string, string> = {
@@ -25,6 +25,22 @@ export function SectionTitle({ children, aside }: { children: React.ReactNode; a
     <div className="mb-3 flex items-baseline justify-between gap-4">
       <h2 className="font-display text-2xl font-semibold leading-none">{children}</h2>
       {aside && <div className="text-sm text-muted">{aside}</div>}
+    </div>
+  );
+}
+
+/** Headline number card. `progress` (0–1) draws a thin bar under the value. */
+export function StatCard({ label, value, detail, progress }: { label: string; value: React.ReactNode; detail?: React.ReactNode; progress?: number }) {
+  return (
+    <div className="rounded-lg border border-line bg-card p-4 shadow-sm">
+      <p className="text-[13px] font-medium text-muted">{label}</p>
+      <p className="tabular mt-2 font-display text-3xl font-semibold leading-none">{value}</p>
+      {progress != null && (
+        <div className="mt-3 h-1 overflow-hidden rounded-full bg-raised">
+          <div className="h-full rounded-full bg-accent" style={{ width: `${Math.round(progress * 100)}%` }} />
+        </div>
+      )}
+      {detail && <p className="mt-2 text-xs text-muted">{detail}</p>}
     </div>
   );
 }
@@ -70,18 +86,18 @@ export function MatchCard({ match, showDate = false }: { match: MatchView; showD
           <span>{match.label}</span>
         </span>
         <span className="tabular font-display text-base font-semibold text-foreground">
-          {showDate && <span className="font-medium text-muted">{formatLongDay(match.startsAt)} · </span>}
+          {showDate && <span className="font-medium text-muted">{formatDay(match.startsAt)} · </span>}
           {formatTime(match.startsAt)}
         </span>
       </div>
       <div className="space-y-1 text-sm">
         <div className="flex items-center justify-between gap-3">
           <TeamName team={match.home} fallback={match.homeLabel} bold={homeWon} />
-          {played && <span className={`tabular font-display text-xl leading-none ${homeWon ? "font-bold" : "font-medium text-muted"}`}>{match.score1}</span>}
+          {played && <span className={`tabular font-display text-xl leading-none ${homeWon ? "font-semibold" : "font-medium text-muted"}`}>{match.score1}</span>}
         </div>
         <div className="flex items-center justify-between gap-3">
           <TeamName team={match.away} fallback={match.awayLabel} bold={awayWon} />
-          {played && <span className={`tabular font-display text-xl leading-none ${awayWon ? "font-bold" : "font-medium text-muted"}`}>{match.score2}</span>}
+          {played && <span className={`tabular font-display text-xl leading-none ${awayWon ? "font-semibold" : "font-medium text-muted"}`}>{match.score2}</span>}
         </div>
       </div>
       {(line || match.note) && (
@@ -107,7 +123,7 @@ export function MatchDays({ matches, emptyText = "No matches." }: { matches: Mat
     <div className="space-y-6">
       {[...days.entries()].map(([key, list]) => (
         <section key={key} id={`day-${key}`}>
-          <h3 className="mb-2 font-display text-xl font-bold leading-none">{formatLongDay(list[0].startsAt)}</h3>
+          <h3 className="mb-2 font-display text-xl font-semibold leading-none">{formatLongDay(list[0].startsAt)}</h3>
           <div className="grid gap-2 sm:grid-cols-2">
             {list.map((m) => (
               <MatchCard key={m.matchNo} match={m} />
@@ -169,7 +185,7 @@ export function StandingsTable({ group, rows, compact = false }: { group: string
                   </>
                 )}
                 <td className="px-1.5 py-1.5 text-right text-muted">{formatNrr(row.nrr)}</td>
-                <td className="px-2 py-1.5 text-right font-display text-lg font-bold leading-none">{row.points}</td>
+                <td className="px-2 py-1.5 text-right font-display text-lg font-semibold leading-none">{row.points}</td>
               </tr>
             ))}
           </tbody>

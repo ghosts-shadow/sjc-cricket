@@ -205,7 +205,7 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, initial }: Props) {
       <TotalsBar card={card} team1={team1} team2={team2} />
 
       {submitted && (
-        <div className="rounded-lg border border-win/50 bg-cricket-tint p-4 text-sm">
+        <div className="rounded-lg border border-win/50 bg-win-tint p-4 text-sm">
           <p className="font-semibold">Result submitted. The public site is updated.</p>
           <Link href="/admin" className="mt-2 inline-block underline underline-offset-2">
             ← All matches
@@ -312,7 +312,7 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, initial }: Props) {
                 <button
                   key={t}
                   onClick={() => setSuperOver(t)}
-                  className={`rounded-md border px-3 py-2 text-sm ${superOver === t ? "border-foreground bg-foreground text-card" : "border-line"}`}
+                  className={`rounded-md border px-3 py-2 text-sm ${superOver === t ? "border-accent bg-cricket-tint text-foreground" : "border-line"}`}
                 >
                   {teamName(t)} won super over
                 </button>
@@ -326,7 +326,7 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, initial }: Props) {
             <button
               onClick={submit}
               disabled={submitting || (card.result.winner === null && knockout && superOver === null)}
-              className="rounded-md bg-foreground py-2.5 font-semibold text-card disabled:opacity-50"
+              className="rounded-md bg-accent py-2.5 font-medium text-white hover:bg-accent-hover disabled:opacity-50"
             >
               {submitting ? "Submitting…" : "Submit result"}
             </button>
@@ -357,7 +357,7 @@ function Header({ label, team1, team2, sync }: { label: string; team1: string; t
         </Link>
         {sync && <span>{sync}</span>}
       </div>
-      <h1 className="mt-2 font-display text-2xl font-bold leading-tight">
+      <h1 className="mt-2 font-display text-2xl font-semibold leading-tight">
         {team1} <span className="font-normal text-muted">v</span> {team2}
       </h1>
       <p className="text-xs text-muted">{label}</p>
@@ -377,7 +377,7 @@ function TotalsBar({ card, team1, team2 }: { card: Scorecard; team1: string; tea
         return (
           <div key={r.team} className={`rounded-md p-2 ${batting ? "bg-cricket-tint" : "opacity-70"}`}>
             <p className="truncate text-xs">{r.name}</p>
-            <p className="tabular font-display text-5xl font-bold leading-none">{card.totals[r.team]}</p>
+            <p className="tabular font-display text-5xl font-semibold leading-none">{card.totals[r.team]}</p>
             {batting && <p className="text-xs font-medium text-cricket">batting</p>}
           </div>
         );
@@ -426,7 +426,7 @@ function BigButton({
     muted: "bg-card border-line text-sm",
   };
   return (
-    <button onClick={onClick} className={`min-h-14 rounded-md border font-display text-2xl font-bold active:scale-95 ${tones[tone]}`}>
+    <button onClick={onClick} className={`min-h-14 rounded-md border font-display text-2xl font-semibold active:scale-95 ${tones[tone]}`}>
       {children}
     </button>
   );

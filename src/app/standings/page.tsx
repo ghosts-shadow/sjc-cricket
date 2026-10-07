@@ -11,7 +11,7 @@ export default async function StandingsPage() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="font-display text-4xl font-bold leading-none sm:text-5xl">Standings</h1>
+        <h1 className="font-display text-3xl font-semibold leading-tight sm:text-4xl">Standings</h1>
         {lastUpdated && <p className="mt-1 text-sm text-muted">Updated {formatStamp(lastUpdated)}</p>}
       </div>
       <QualifyKey />

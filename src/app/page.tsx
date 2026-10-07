@@ -1,23 +1,41 @@
 import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
-import { MatchDays, QualifyKey, SectionTitle, StandingsTable } from "@/components/cricket";
+import { MatchDays, QualifyKey, SectionTitle, StandingsTable, StatCard } from "@/components/cricket";
 import { getTournament, type Tournament } from "@/lib/data";
-import { dayKey, formatStamp } from "@/lib/format";
+import { dayKey, formatLongDay, formatStamp } from "@/lib/format";
 import { GROUPS } from "@/lib/tournament";
 
 export default async function HomePage() {
   const tournament = await getTournament();
   const played = tournament.matches.filter((m) => m.status === "COMPLETED").length;
+  const firstKnockout = tournament.matches.find((m) => m.stage !== "GROUP");
 
   return (
     <div className="space-y-10">
       <section>
-        <h1 className="font-display text-4xl font-bold leading-none sm:text-5xl">Cricket 2026</h1>
-        <p className="mt-1 text-sm text-muted">
-          21 teams · 4 groups · {played} of {tournament.matches.length} matches played
-          {tournament.lastUpdated && <> · Updated {formatStamp(tournament.lastUpdated)}</>}
-        </p>
+        <h1 className="font-display text-3xl font-semibold leading-none sm:text-4xl">Cricket 2026</h1>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <StatCard label="Teams" value={tournament.teams.length} detail={`${GROUPS.length} groups · top 2 go through`} />
+          <StatCard
+            label="Matches played"
+            value={
+              <>
+                {played}
+                <span className="text-lg font-medium text-muted"> / {tournament.matches.length}</span>
+              </>
+            }
+            progress={tournament.matches.length ? played / tournament.matches.length : 0}
+            detail={tournament.lastUpdated ? `Updated ${formatStamp(tournament.lastUpdated)}` : undefined}
+          />
+          {firstKnockout && (
+            <StatCard
+              label="Knockouts start"
+              value={<span className="text-xl">{formatLongDay(firstKnockout.startsAt)}</span>}
+              detail="Quarter-finals, then semis and the final"
+            />
+          )}
+        </div>
       </section>
 
       <Suspense fallback={<p className="text-sm text-muted">Loading fixtures…</p>}>

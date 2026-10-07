@@ -41,7 +41,7 @@ async function Dashboard() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="font-display text-4xl font-bold leading-none sm:text-5xl">Results</h1>
+          <h1 className="font-display text-3xl font-semibold leading-tight sm:text-4xl">Results</h1>
           <p className="mt-1 text-sm text-muted">Signed in as {organiser.name}. Every change is logged with your name.</p>
         </div>
         <form action={logout}>
@@ -57,7 +57,7 @@ async function Dashboard() {
 
       {[...days.entries()].map(([key, list]) => (
         <section key={key} id={`day-${key}`} className="scroll-mt-4">
-          <h2 className="mb-2 font-display text-xl font-bold leading-none">{formatLongDay(list[0].startsAt)}</h2>
+          <h2 className="mb-2 font-display text-xl font-semibold leading-none">{formatLongDay(list[0].startsAt)}</h2>
           <ul className="divide-y divide-line overflow-hidden rounded-lg border border-line bg-card shadow-sm">
             {list.map((m) => (
               <li key={m.matchNo} id={`match-${m.matchNo}`} className="flex flex-wrap items-center gap-x-3 gap-y-2 p-3 text-sm">
@@ -72,7 +72,7 @@ async function Dashboard() {
                   <div className="mt-1 truncate">
                     {m.homeLabel}
                     {m.status === "COMPLETED" ? (
-                      <span className="tabular mx-1.5 font-display text-lg font-bold">
+                      <span className="tabular mx-1.5 font-display text-lg font-semibold">
                         {m.score1}–{m.score2}
                       </span>
                     ) : (
@@ -87,7 +87,7 @@ async function Dashboard() {
                       Score live
                     </Link>
                   )}
-                  <Link href={`/admin/match/${m.matchNo}`} className="rounded-md bg-foreground px-3 py-1.5 font-medium text-card">
+                  <Link href={`/admin/match/${m.matchNo}`} className="rounded-md bg-accent px-3 py-1.5 font-medium text-white hover:bg-accent-hover">
                     {m.finished ? "Edit" : "Enter result"}
                   </Link>
                 </div>

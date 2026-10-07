@@ -3,11 +3,15 @@
  *
  *   npm run organiser:add -- "Name" 482913
  *   npm run organiser:add -- "Name" --disable
+ *
+ * Use organiser:add:prod instead to write to the production database in .env.neon.
  */
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
+/** Printed after each change so it's obvious whether local or production was touched. */
+const dbHost = (process.env.DATABASE_URL ?? "local .env").replace(/^.*@/, "").replace(/[/?].*$/, "");
 
 async function main() {
   const [name, pinOrFlag] = process.argv.slice(2);
@@ -18,7 +22,7 @@ async function main() {
 
   if (pinOrFlag === "--disable") {
     await prisma.organiser.update({ where: { name }, data: { active: false } });
-    console.log(`Disabled ${name}.`);
+    console.log(`Disabled ${name} on ${dbHost}.`);
     return;
   }
 
@@ -32,7 +36,7 @@ async function main() {
     create: { name, pinHash },
     update: { pinHash, active: true },
   });
-  console.log(`Saved login for ${name}.`);
+  console.log(`Saved login for ${name} on ${dbHost}.`);
 }
 
 main()

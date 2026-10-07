@@ -50,7 +50,7 @@ async function Team({ params }: { params: PageProps<"/teams/[slug]">["params"] }
         <p className="flex items-center gap-2 text-sm text-muted">
           <GroupBadge group={team.group} /> Group {team.group}
         </p>
-        <h1 className="mt-1 font-display text-4xl font-bold leading-none sm:text-5xl">{team.name}</h1>
+        <h1 className="mt-1 font-display text-3xl font-semibold leading-tight sm:text-4xl">{team.name}</h1>
       </div>
 
       <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">

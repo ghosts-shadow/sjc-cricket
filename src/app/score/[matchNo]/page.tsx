@@ -28,7 +28,7 @@ async function ScoreLoader({ params }: { params: PageProps<"/score/[matchNo]">["
   if (!match.home || !match.away) {
     return (
       <div className="space-y-2">
-        <h1 className="font-display text-2xl font-bold">{match.label}</h1>
+        <h1 className="font-display text-2xl font-semibold">{match.label}</h1>
         <p className="text-sm text-muted">The teams for this match aren&apos;t decided yet.</p>
         <Link href="/admin" className="text-sm underline underline-offset-2">
           ← All matches
