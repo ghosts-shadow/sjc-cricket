@@ -13,6 +13,8 @@
     "db:seed": "tsx prisma/seed.ts",
     "organiser:add": "tsx scripts/add-organiser.ts",
     "organiser:add:prod": "tsx --env-file=.env.neon scripts/add-organiser.ts",
+    "players:import": "tsx scripts/import-players.ts",
+    "players:import:prod": "tsx --env-file=.env.neon scripts/import-players.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {

@@ -15,9 +15,13 @@ export type Ball =
   | { t: "nb"; runs: number } // no-ball; runs = runs off the bat on that ball
   | { t: "db" }; // dead ball
 
+export type PairNames = [string, string];
+
 export type ScoreEvent =
   | { type: "ball"; ball: Ball }
   | { type: "female"; on: boolean } // sets the kind of the current over before its first ball
+  | { type: "batters"; names: PairNames } // the pair batting the current over's pair slot
+  | { type: "bowler"; name: string } // who bowls the current over (later events correct it)
   | { type: "penalty"; team: 1 | 2; runs: number; note?: string } // deducted from that team's total
   | { type: "endInnings" };
 
@@ -34,6 +38,7 @@ export interface OverCard {
   index: number; // 0-5
   pair: number; // 0-2
   female: boolean;
+  bowler: string | null;
   balls: Ball[];
   legalBalls: number;
   batRuns: number;
@@ -53,6 +58,8 @@ export interface OverCard {
 export interface InningsCard {
   battingTeam: 1 | 2;
   overs: OverCard[];
+  /** Batters for each of the 3 pairs, once the scorer has entered them. */
+  pairs: [PairNames | null, PairNames | null, PairNames | null];
   pairTotals: [number, number, number];
   runs: number; // sum of overs (before misconduct penalties)
   complete: boolean;
@@ -76,11 +83,12 @@ export interface Scorecard {
 /** Escalating penalty added on the 4th, 5th and 6th wide (normal overs) or dead ball (all overs). */
 const ESCALATION: Record<number, number> = { 4: 2, 5: 4, 6: 6 };
 
-export function summariseOver(index: number, female: boolean, balls: Ball[]): OverCard {
+export function summariseOver(index: number, female: boolean, balls: Ball[], bowler: string | null = null): OverCard {
   const card: OverCard = {
     index,
     pair: Math.floor(index / 2),
     female,
+    bowler,
     balls,
     legalBalls: 0,
     batRuns: 0,
@@ -159,6 +167,15 @@ export function summariseOver(index: number, female: boolean, balls: Ball[]): Ov
   return card;
 }
 
+export const MAX_NAME_LENGTH = 40;
+
+/** Trim and collapse spaces; null if the result is empty or too long. */
+export function cleanName(input: unknown): string | null {
+  if (typeof input !== "string") return null;
+  const name = input.trim().replace(/\s+/g, " ");
+  return name.length > 0 && name.length <= MAX_NAME_LENGTH ? name : null;
+}
+
 /** Validate events coming from a scorer's phone before storing or replaying them. */
 export function parseEvents(input: unknown): ScoreEvent[] | null {
   if (!Array.isArray(input) || input.length > 1000) return null;
@@ -176,6 +193,14 @@ export function parseEvents(input: unknown): ScoreEvent[] | null {
       else return null;
     } else if (e.type === "female" && typeof e.on === "boolean") {
       events.push({ type: "female", on: e.on });
+    } else if (e.type === "batters" && Array.isArray(e.names) && e.names.length === 2) {
+      const [a, b] = e.names.map(cleanName);
+      if (!a || !b) return null;
+      events.push({ type: "batters", names: [a, b] });
+    } else if (e.type === "bowler") {
+      const name = cleanName(e.name);
+      if (!name) return null;
+      events.push({ type: "bowler", name });
     } else if (e.type === "penalty" && (e.team === 1 || e.team === 2) && e.runs === WICKET_DEDUCTION) {
       events.push({ type: "penalty", team: e.team, runs: WICKET_DEDUCTION, note: typeof e.note === "string" ? e.note.slice(0, 100) : undefined });
     } else if (e.type === "endInnings") {
@@ -193,7 +218,7 @@ export function parseSetup(input: unknown): ScoringSetup | null {
 }
 
 function newInnings(battingTeam: 1 | 2): InningsCard {
-  return { battingTeam, overs: [], pairTotals: [0, 0, 0], runs: 0, complete: false };
+  return { battingTeam, overs: [], pairs: [null, null, null], pairTotals: [0, 0, 0], runs: 0, complete: false };
 }
 
 export function replay(setup: ScoringSetup, events: ScoreEvent[]): Scorecard {
@@ -223,12 +248,18 @@ export function replay(setup: ScoringSetup, events: ScoreEvent[]): Scorecard {
     switch (event.type) {
       case "female": {
         const over = activeOver(inn);
-        if (over.balls.length === 0) Object.assign(over, summariseOver(over.index, event.on, []));
+        if (over.balls.length === 0) Object.assign(over, summariseOver(over.index, event.on, [], over.bowler));
         break;
       }
+      case "batters":
+        inn.pairs[activeOver(inn).pair] = event.names;
+        break;
+      case "bowler":
+        activeOver(inn).bowler = event.name;
+        break;
       case "ball": {
         const over = activeOver(inn);
-        Object.assign(over, summariseOver(over.index, over.female, [...over.balls, event.ball]));
+        Object.assign(over, summariseOver(over.index, over.female, [...over.balls, event.ball], over.bowler));
         if (over.complete && inn.overs.length === OVERS_PER_INNINGS) closeInnings();
         break;
       }
@@ -271,4 +302,18 @@ export function replay(setup: ScoringSetup, events: ScoreEvent[]): Scorecard {
   const target = innings[0].complete ? totals[innings[0].battingTeam] + 1 : null;
 
   return { innings, current, penalties, totals, target, finished, result, warnings };
+}
+
+/** Every player name in a scorecard, by side: batters belong to the batting side, bowlers to the other. */
+export function namesBySide(card: Scorecard): { 1: string[]; 2: string[] } {
+  const names = { 1: new Map<string, string>(), 2: new Map<string, string>() };
+  const add = (side: 1 | 2, name: string) => {
+    if (!names[side].has(name.toLowerCase())) names[side].set(name.toLowerCase(), name);
+  };
+  for (const inn of card.innings) {
+    const fielding = inn.battingTeam === 1 ? 2 : 1;
+    for (const pair of inn.pairs) pair?.forEach((n) => add(inn.battingTeam, n));
+    for (const over of inn.overs) if (over.bowler) add(fielding, over.bowler);
+  }
+  return { 1: [...names[1].values()], 2: [...names[2].values()] };
 }

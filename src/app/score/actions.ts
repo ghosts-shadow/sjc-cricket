@@ -5,7 +5,8 @@ import type { Prisma } from "@prisma/client";
 import { requireOrganiser } from "@/lib/auth";
 import { getTournament, TOURNAMENT_TAG } from "@/lib/data";
 import { prisma } from "@/lib/db";
-import { parseEvents, parseSetup, replay } from "@/lib/scoring";
+import { saveRosterNames } from "@/lib/roster";
+import { parseEvents, parseSetup, replay, type ScoreEvent, type ScoringSetup } from "@/lib/scoring";
 
 export interface ScoringResult {
   ok: boolean;
@@ -33,7 +34,18 @@ export async function syncScoring(matchNo: number, setupInput: unknown, eventsIn
     create: { matchId: match.id, ...data },
     update: data,
   });
+  await rememberPlayers(matchNo, setup, events);
   return { ok: true };
+}
+
+/** Grow both teams' rosters from the names in this session. Never fails the save it rides on. */
+async function rememberPlayers(matchNo: number, setup: ScoringSetup, events: ScoreEvent[]) {
+  try {
+    const view = (await getTournament()).matches.find((m) => m.matchNo === matchNo);
+    if (view?.home && view.away) await saveRosterNames({ 1: view.home.id, 2: view.away.id }, setup, events);
+  } catch (err) {
+    console.error("rememberPlayers failed", err);
+  }
 }
 
 /** Final submit: totals are recomputed here from the events, never trusted from the phone. */
@@ -97,6 +109,7 @@ export async function submitScoring(
     }),
   ]);
 
+  await rememberPlayers(matchNo, setup, events);
   updateTag(TOURNAMENT_TAG);
   return { ok: true };
 }

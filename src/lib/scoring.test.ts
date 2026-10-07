@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseEvents, parseSetup, replay, summariseOver, type Ball, type ScoreEvent } from "./scoring";
+import { namesBySide, parseEvents, parseSetup, replay, summariseOver, type Ball, type ScoreEvent } from "./scoring";
 
 describe("parseEvents / parseSetup", () => {
   it("accepts well-formed events and strips unknown fields", () => {
@@ -171,5 +171,64 @@ describe("replay — whole match", () => {
   it("warns when the female pair bats last", () => {
     const events: ScoreEvent[] = [...sixes(1), ...sixes(1), ...sixes(1), ...sixes(1), { type: "female", on: true }, ...sixes(1)];
     expect(replay({ battingFirst: 1 }, events).warnings.join()).toMatch(/1st or 2nd/);
+  });
+});
+
+describe("batters and bowlers", () => {
+  const over = (balls: Ball[]): ScoreEvent[] => balls.map((ball) => ({ type: "ball", ball }));
+  const sixes = (runs: number) => over(times(6, run(runs)));
+
+  it("attaches the bowler to the over and the batters to the pair, through later balls", () => {
+    const card = replay({ battingFirst: 1 }, [
+      { type: "batters", names: ["Anil", "Ben"] },
+      { type: "bowler", name: "Xavier" },
+      ...sixes(1),
+      { type: "bowler", name: "Yusuf" },
+      { type: "female", on: true },
+      ...sixes(2),
+      { type: "batters", names: ["Cara", "Dev"] },
+      { type: "bowler", name: "Xavier" },
+      ...sixes(0),
+    ]);
+    const inn = card.innings[0];
+    expect(inn.overs.map((o) => o.bowler)).toEqual(["Xavier", "Yusuf", "Xavier"]);
+    expect(inn.overs[1].female).toBe(true);
+    expect(inn.pairs).toEqual([["Anil", "Ben"], ["Cara", "Dev"], null]);
+    expect(inn.runs).toBe(18);
+  });
+
+  it("a later bowler event corrects the over being bowled; undo restores the old one", () => {
+    const events: ScoreEvent[] = [{ type: "bowler", name: "Xavier" }, ...over([run(1), run(2)]), { type: "bowler", name: "Zed" }];
+    expect(replay({ battingFirst: 1 }, events).innings[0].overs[0].bowler).toBe("Zed");
+    expect(replay({ battingFirst: 1 }, events.slice(0, -1)).innings[0].overs[0].bowler).toBe("Xavier");
+  });
+
+  it("names go to the second innings once the first is over", () => {
+    const first = Array.from({ length: 6 }, () => sixes(1)).flat();
+    const card = replay({ battingFirst: 2 }, [...first, { type: "batters", names: ["Eli", "Fay"] }, { type: "bowler", name: "Gus" }]);
+    expect(card.innings[1].pairs[0]).toEqual(["Eli", "Fay"]);
+    expect(card.innings[1].overs[0].bowler).toBe("Gus");
+  });
+
+  it("namesBySide puts batters on the batting side and bowlers on the fielding side, without duplicates", () => {
+    const card = replay({ battingFirst: 2 }, [
+      { type: "batters", names: ["Anil", "Ben"] },
+      { type: "bowler", name: "Xavier" },
+      ...sixes(1),
+      { type: "bowler", name: "xavier" },
+      ...sixes(1),
+    ]);
+    expect(namesBySide(card)).toEqual({ 1: ["Xavier"], 2: ["Anil", "Ben"] });
+  });
+
+  it("parseEvents cleans names and rejects bad ones", () => {
+    expect(parseEvents([{ type: "bowler", name: "  Joe   Root " }, { type: "batters", names: ["A", " B "] }])).toEqual([
+      { type: "bowler", name: "Joe Root" },
+      { type: "batters", names: ["A", "B"] },
+    ]);
+    expect(parseEvents([{ type: "bowler", name: "   " }])).toBeNull();
+    expect(parseEvents([{ type: "bowler", name: "x".repeat(41) }])).toBeNull();
+    expect(parseEvents([{ type: "batters", names: ["Only one"] }])).toBeNull();
+    expect(parseEvents([{ type: "batters", names: ["A", 7] }])).toBeNull();
   });
 });

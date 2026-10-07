@@ -3,15 +3,21 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState, useSyncExternalStore, useTransition } from "react";
 import {
+  cleanName,
+  MAX_NAME_LENGTH,
+  namesBySide,
   OVERS_PER_INNINGS,
   replay,
   type Ball,
   type OverCard,
+  type PairNames,
   type Scorecard,
   type ScoreEvent,
   type ScoringSetup,
 } from "@/lib/scoring";
 import { submitScoring, syncScoring } from "../actions";
+
+type Rosters = { 1: string[]; 2: string[] };
 
 interface Props {
   matchNo: number;
@@ -19,8 +25,19 @@ interface Props {
   team1: string;
   team2: string;
   knockout: boolean;
+  /** Each team's known players, for the batter and bowler dropdowns. */
+  rosters: Rosters;
   initial: { setup: ScoringSetup | null; events: ScoreEvent[]; submitted: boolean; updatedAt: string | null };
 }
+
+/** Case-insensitive union of name lists, sorted. The first spelling seen wins. */
+function mergeNames(...lists: string[][]): string[] {
+  const byKey = new Map<string, string>();
+  for (const name of lists.flat()) if (!byKey.has(name.toLowerCase())) byKey.set(name.toLowerCase(), name);
+  return [...byKey.values()].sort((a, b) => a.localeCompare(b));
+}
+
+const sameName = (a: string | null, b: string | null) => a != null && b != null && a.toLowerCase() === b.toLowerCase();
 
 interface LocalCopy {
   setup: ScoringSetup | null;
@@ -70,7 +87,7 @@ interface Doc {
   rev: number;
 }
 
-function ScorerApp({ matchNo, label, team1, team2, knockout, initial }: Props) {
+function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }: Props) {
   const storageKey = `sjc-score-${matchNo}`;
   // Prefer this phone's copy if it is newer than the server's (e.g. scored while offline).
   const [doc, setDoc] = useState<Doc>(() => {
@@ -92,6 +109,9 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, initial }: Props) {
   const [submitted, setSubmitted] = useState(initial.submitted);
   const [superOver, setSuperOver] = useState<1 | 2 | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Names added on this phone that haven't been used in an event yet.
+  const [added, setAdded] = useState<Rosters>({ 1: [], 2: [] });
+  const [editingPlayers, setEditingPlayers] = useState(false);
   const [submitting, startSubmit] = useTransition();
   const { setup, events } = doc;
 
@@ -127,14 +147,19 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, initial }: Props) {
   const syncText = submitted || doc.rev === 0 ? "" : synced.rev !== doc.rev ? "Saving…" : SYNC_TEXT[synced.status];
   const card = useMemo(() => (setup ? replay(setup, events) : null), [setup, events]);
   const teamName = (t: 1 | 2) => (t === 1 ? team1 : team2);
+  const used = useMemo<Rosters>(() => (card ? namesBySide(card) : { 1: [], 2: [] }), [card]);
+  const rosterFor = (side: 1 | 2) => mergeNames(rosters[side], used[side], added[side]);
+  const addName = (side: 1 | 2, name: string) => setAdded((a) => ({ ...a, [side]: [...a[side], name] }));
 
   const change = (next: (d: Doc) => Omit<Doc, "rev">) => setDoc((d) => ({ ...next(d), rev: d.rev + 1 }));
   const setSetup = (s: ScoringSetup) => change((d) => ({ setup: s, events: d.events }));
-  const push = (event: ScoreEvent) => {
-    change((d) => ({ setup: d.setup, events: [...d.events, event] }));
+  const pushMany = (more: ScoreEvent[]) => {
+    if (more.length) change((d) => ({ setup: d.setup, events: [...d.events, ...more] }));
     setNbPending(false);
+    setEditingPlayers(false);
     setError(null);
   };
+  const push = (event: ScoreEvent) => pushMany([event]);
   const ball = (b: Ball) => push({ type: "ball", ball: b });
   const undo = () => {
     change((d) => ({ setup: d.setup, events: d.events.slice(0, -1) }));
@@ -174,6 +199,19 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, initial }: Props) {
   const battingTeam = innings?.battingTeam;
   const chasing = inningsIndex === 1 && card.target != null && battingTeam != null;
   const needed = chasing ? card.target! - card.totals[battingTeam!] : null;
+  // Balls stay locked until this over has a bowler and its pair has two batters.
+  const fieldingTeam = battingTeam === 1 ? 2 : 1;
+  const pairNames = innings ? innings.pairs[Math.floor(overIndex / 2)] : null;
+  const bowlerName = openOver?.bowler ?? null;
+  const needPlayers = !pairNames || !bowlerName;
+  const savePlayers = (batters: PairNames | null, bowler: string) => {
+    const more: ScoreEvent[] = [];
+    if (batters && (batters[0] !== pairNames?.[0] || batters[1] !== pairNames?.[1])) {
+      more.push({ type: "batters", names: batters });
+    }
+    if (bowler !== bowlerName) more.push({ type: "bowler", name: bowler });
+    pushMany(more);
+  };
 
   const submit = () => {
     if (!card.result) return;
@@ -239,45 +277,78 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, initial }: Props) {
             </label>
           </div>
 
-          <OverLine over={openOver} />
-
-          {nbPending ? (
-            <div>
-              <p className="mb-2 text-sm font-medium">No-ball: runs off the bat?</p>
-              <div className="grid grid-cols-5 gap-2">
-                {[0, 1, 2, 3, 4, 5, 6].map((r) => (
-                  <BigButton key={r} onClick={() => ball({ t: "nb", runs: r })}>
-                    {r}
-                  </BigButton>
-                ))}
-                <BigButton tone="muted" onClick={() => setNbPending(false)}>
-                  Cancel
-                </BigButton>
-              </div>
-            </div>
+          {needPlayers || editingPlayers ? (
+            <PlayersForm
+              key={`${inningsIndex}-${overIndex}-${editingPlayers}`}
+              title={
+                editingPlayers
+                  ? `Change players for over ${overIndex + 1}`
+                  : pairNames
+                    ? `Over ${overIndex + 1}: who's bowling?`
+                    : `Pair ${Math.floor(overIndex / 2) + 1}, over ${overIndex + 1}: who's batting and bowling?`
+              }
+              battingTeam={teamName(battingTeam)}
+              fieldingTeam={teamName(fieldingTeam)}
+              batRoster={rosterFor(battingTeam)}
+              bowlRoster={rosterFor(fieldingTeam)}
+              pair={pairNames}
+              bowler={bowlerName}
+              askBatters={editingPlayers || !pairNames}
+              onAdd={(side, name) => addName(side === "bat" ? battingTeam : fieldingTeam, name)}
+              onSave={savePlayers}
+              onCancel={editingPlayers ? () => setEditingPlayers(false) : undefined}
+            />
           ) : (
             <>
-              <div className="grid grid-cols-3 gap-2">
-                {RUN_BUTTONS.map((r) => (
-                  <BigButton key={r} onClick={() => ball({ t: "run", runs: r })}>
-                    {r}
-                  </BigButton>
-                ))}
-              </div>
-              <div className="grid grid-cols-4 gap-2">
-                <BigButton tone="danger" onClick={() => ball({ t: "out" })}>
-                  OUT
-                </BigButton>
-                <BigButton tone="extra" onClick={() => ball({ t: "wd" })}>
-                  WD
-                </BigButton>
-                <BigButton tone="extra" onClick={() => setNbPending(true)}>
-                  NB
-                </BigButton>
-                <BigButton tone="extra" onClick={() => ball({ t: "db" })}>
-                  DB
-                </BigButton>
-              </div>
+              <p className="flex items-start justify-between gap-2 text-sm">
+                <span>
+                  <span className="text-muted">Batting</span> {pairNames![0]} &amp; {pairNames![1]}
+                  <span className="text-muted"> · Bowling</span> {bowlerName}
+                </span>
+                <button onClick={() => setEditingPlayers(true)} className="shrink-0 text-xs text-muted underline underline-offset-2">
+                  Change
+                </button>
+              </p>
+              <OverLine over={openOver} />
+              {nbPending ? (
+                <div>
+                  <p className="mb-2 text-sm font-medium">No-ball: runs off the bat?</p>
+                  <div className="grid grid-cols-5 gap-2">
+                    {[0, 1, 2, 3, 4, 5, 6].map((r) => (
+                      <BigButton key={r} onClick={() => ball({ t: "nb", runs: r })}>
+                        {r}
+                      </BigButton>
+                    ))}
+                    <BigButton tone="muted" onClick={() => setNbPending(false)}>
+                      Cancel
+                    </BigButton>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-3 gap-2">
+                    {RUN_BUTTONS.map((r) => (
+                      <BigButton key={r} onClick={() => ball({ t: "run", runs: r })}>
+                        {r}
+                      </BigButton>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-4 gap-2">
+                    <BigButton tone="danger" onClick={() => ball({ t: "out" })}>
+                      OUT
+                    </BigButton>
+                    <BigButton tone="extra" onClick={() => ball({ t: "wd" })}>
+                      WD
+                    </BigButton>
+                    <BigButton tone="extra" onClick={() => setNbPending(true)}>
+                      NB
+                    </BigButton>
+                    <BigButton tone="extra" onClick={() => ball({ t: "db" })}>
+                      DB
+                    </BigButton>
+                  </div>
+                </>
+              )}
             </>
           )}
 
@@ -410,6 +481,152 @@ function OverLine({ over }: { over: OverCard | null }) {
   );
 }
 
+const ADD_PLAYER = "__add__";
+const pickerClass = "mt-1 w-full rounded-md border border-edge bg-background px-3 py-2.5 text-base";
+
+/** A roster dropdown whose last option, "+ Add player…", turns it into a name box. */
+function NamePicker({
+  label,
+  options,
+  value,
+  exclude,
+  onChange,
+  onAdd,
+}: {
+  label: string;
+  options: string[];
+  value: string | null;
+  /** A name taken by the other picker (the other batter), shown but not selectable. */
+  exclude?: string | null;
+  onChange: (name: string) => void;
+  onAdd: (name: string) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState("");
+
+  const commit = () => {
+    const name = cleanName(draft);
+    if (!name) return;
+    const existing = options.find((o) => sameName(o, name));
+    if (!existing) onAdd(name);
+    onChange(existing ?? name);
+    setAdding(false);
+    setDraft("");
+  };
+
+  if (adding) {
+    return (
+      <div>
+        <span className="text-xs text-muted">{label}</span>
+        <div className="mt-1 flex gap-2">
+          <input
+            autoFocus
+            value={draft}
+            maxLength={MAX_NAME_LENGTH}
+            placeholder="Player name"
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && commit()}
+            className="min-w-0 flex-1 rounded-md border border-edge bg-background px-3 py-2.5 text-base"
+          />
+          <button onClick={commit} disabled={!cleanName(draft)} className="rounded-md bg-accent px-3 text-sm font-medium text-white disabled:opacity-50">
+            Add
+          </button>
+          <button onClick={() => setAdding(false)} className="rounded-md border border-line px-3 text-sm">
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <label className="block">
+      <span className="text-xs text-muted">{label}</span>
+      <select
+        value={value ?? ""}
+        onChange={(e) => (e.target.value === ADD_PLAYER ? setAdding(true) : onChange(e.target.value))}
+        className={pickerClass}
+      >
+        <option value="" disabled>
+          Choose…
+        </option>
+        {options.map((name) => (
+          <option key={name} value={name} disabled={sameName(name, exclude ?? null)}>
+            {name}
+          </option>
+        ))}
+        <option value={ADD_PLAYER}>+ Add player…</option>
+      </select>
+    </label>
+  );
+}
+
+/** Asks for the batting pair (at the start of each pair) and the bowler (every over). */
+function PlayersForm({
+  title,
+  battingTeam,
+  fieldingTeam,
+  batRoster,
+  bowlRoster,
+  pair,
+  bowler,
+  askBatters,
+  onAdd,
+  onSave,
+  onCancel,
+}: {
+  title: string;
+  battingTeam: string;
+  fieldingTeam: string;
+  batRoster: string[];
+  bowlRoster: string[];
+  pair: PairNames | null;
+  bowler: string | null;
+  askBatters: boolean;
+  onAdd: (side: "bat" | "bowl", name: string) => void;
+  onSave: (batters: PairNames | null, bowler: string) => void;
+  onCancel?: () => void;
+}) {
+  const [b1, setB1] = useState<string | null>(pair?.[0] ?? null);
+  const [b2, setB2] = useState<string | null>(pair?.[1] ?? null);
+  const [bowl, setBowl] = useState<string | null>(bowler);
+  const battersOk = !askBatters || (b1 != null && b2 != null && !sameName(b1, b2));
+  const ready = battersOk && bowl != null;
+
+  return (
+    <div className="space-y-3 rounded-md border border-edge bg-raised p-3">
+      <p className="text-sm font-medium">{title}</p>
+      {askBatters ? (
+        <>
+          <NamePicker label={`Batter 1 · ${battingTeam}`} options={batRoster} value={b1} exclude={b2} onChange={setB1} onAdd={(n) => onAdd("bat", n)} />
+          <NamePicker label={`Batter 2 · ${battingTeam}`} options={batRoster} value={b2} exclude={b1} onChange={setB2} onAdd={(n) => onAdd("bat", n)} />
+        </>
+      ) : (
+        pair && (
+          <p className="text-sm">
+            <span className="text-muted">Batting</span> {pair[0]} &amp; {pair[1]}
+          </p>
+        )
+      )}
+      <NamePicker label={`Bowler · ${fieldingTeam}`} options={bowlRoster} value={bowl} onChange={setBowl} onAdd={(n) => onAdd("bowl", n)} />
+      <div className="flex gap-2">
+        {onCancel && (
+          <button onClick={onCancel} className="rounded-md border border-line px-4 py-2.5 text-sm">
+            Cancel
+          </button>
+        )}
+        <button
+          onClick={() => ready && onSave(askBatters ? [b1!, b2!] : null, bowl!)}
+          disabled={!ready}
+          className="flex-1 rounded-md bg-accent py-2.5 font-medium text-white hover:bg-accent-hover disabled:opacity-50"
+        >
+          {onCancel ? "Save" : "Start scoring"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function BigButton({
   children,
   onClick,
@@ -480,13 +697,28 @@ function ScorecardView({ card, teamName }: { card: Scorecard; teamName: (t: 1 | 
                       P{o.pair + 1} · O{o.index + 1}
                       {o.female && " ♀"}
                     </td>
-                    <td className="py-1.5">{o.balls.map(chip).join(" ")}</td>
+                    <td className="py-1.5">
+                      {o.balls.map(chip).join(" ")}
+                      {o.bowler && <span className="block text-muted">Bowler {o.bowler}</span>}
+                    </td>
                     <td className="w-10 py-1.5 text-right font-semibold">{o.total}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            <p className="mt-2 text-xs text-muted">Pair totals: {inn.pairTotals.join(" · ")}</p>
+            <ul className="mt-2 space-y-0.5 text-xs text-muted">
+              {inn.pairTotals.map((total, p) =>
+                inn.overs.some((o) => o.pair === p) ? (
+                  <li key={p} className="flex justify-between gap-2">
+                    <span>
+                      Pair {p + 1}
+                      {inn.pairs[p] && `: ${inn.pairs[p]![0]} & ${inn.pairs[p]![1]}`}
+                    </span>
+                    <span className="tabular">{total}</span>
+                  </li>
+                ) : null,
+              )}
+            </ul>
           </div>
         ),
       )}

@@ -5,6 +5,7 @@ import { Suspense } from "react";
 import { requireOrganiser } from "@/lib/auth";
 import { getTournament } from "@/lib/data";
 import { prisma } from "@/lib/db";
+import { getRosters } from "@/lib/roster";
 import { parseEvents, parseSetup } from "@/lib/scoring";
 import { Scorer } from "./scorer";
 
@@ -37,7 +38,10 @@ async function ScoreLoader({ params }: { params: PageProps<"/score/[matchNo]">["
     );
   }
 
-  const session = await prisma.scoringSession.findUnique({ where: { matchId: match.id } });
+  const [session, rosters] = await Promise.all([
+    prisma.scoringSession.findUnique({ where: { matchId: match.id } }),
+    getRosters({ 1: match.home.id, 2: match.away.id }),
+  ]);
   return (
     <Scorer
       matchNo={match.matchNo}
@@ -45,6 +49,7 @@ async function ScoreLoader({ params }: { params: PageProps<"/score/[matchNo]">["
       team1={match.home.name}
       team2={match.away.name}
       knockout={match.stage !== "GROUP"}
+      rosters={rosters}
       initial={{
         setup: session ? parseSetup(session.setup) : null,
         events: (session && parseEvents(session.events)) || [],

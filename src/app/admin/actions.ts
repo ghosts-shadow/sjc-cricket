@@ -50,7 +50,14 @@ export async function login(_prev: FormState, formData: FormData): Promise<FormS
   }
 
   await prisma.organiser.update({ where: { id: organiser.id }, data: { failedLogins: 0, lockedUntil: null } });
-  const token = await signSession({ organiserId: organiser.id, name: organiser.name });
+  let token: string;
+  try {
+    token = await signSession({ organiserId: organiser.id, name: organiser.name });
+  } catch (err) {
+    // A server setup problem (e.g. SESSION_SECRET missing or too short), not the organiser's fault.
+    console.error("login: could not sign session", err);
+    return { error: "Sign-in isn't set up on the server yet. Your PIN is fine; tell the site admin." };
+  }
   (await cookies()).set(SESSION_COOKIE, token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
