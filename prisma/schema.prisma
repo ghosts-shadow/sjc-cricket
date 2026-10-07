@@ -1,0 +1,108 @@
+// SJC Sports Fest cricket. Team names only: never store player names, IDs, phones or emails.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Stage {
+  GROUP
+  QF
+  SF
+  THIRD
+  FINAL
+}
+
+enum MatchStatus {
+  SCHEDULED
+  COMPLETED
+  WALKOVER
+  ABANDONED
+  DOUBLE_FORFEIT
+  POSTPONED
+}
+
+model Team {
+  id      Int    @id @default(autoincrement())
+  name    String @unique
+  slug    String @unique
+  group   String // "A".."D"
+  drawPos Int // position in the group draw, final tie-break
+
+  matchesAsTeam1 Match[] @relation("team1")
+  matchesAsTeam2 Match[] @relation("team2")
+  matchesWon     Match[] @relation("winner")
+}
+
+model Match {
+  id       Int         @id @default(autoincrement())
+  matchNo  Int         @unique
+  stage    Stage
+  group    String?
+  startsAt DateTime
+  // Knockout teams stay null until known; slot1/slot2 say where they come from ("A1", "W46").
+  team1Id  Int?
+  team1    Team?       @relation("team1", fields: [team1Id], references: [id])
+  team2Id  Int?
+  team2    Team?       @relation("team2", fields: [team2Id], references: [id])
+  slot1    String?
+  slot2    String?
+  score1   Int?
+  score2   Int?
+  status   MatchStatus @default(SCHEDULED)
+  // Only set for walkovers and knockout super-overs; otherwise the winner comes from the scores.
+  winnerId Int?
+  winner   Team?       @relation("winner", fields: [winnerId], references: [id])
+  note     String?
+
+  updatedById Int?
+  updatedBy   Organiser?      @relation(fields: [updatedById], references: [id])
+  updatedAt   DateTime        @updatedAt
+  auditLogs   AuditLog[]
+  scoring     ScoringSession?
+}
+
+model Organiser {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  pinHash   String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  // Brute-force protection: 5 wrong PINs lock the login for 15 minutes.
+  failedLogins Int       @default(0)
+  lockedUntil  DateTime?
+
+  matchesUpdated Match[]
+  auditLogs      AuditLog[]
+  scoring        ScoringSession[]
+}
+
+model AuditLog {
+  id          Int       @id @default(autoincrement())
+  organiserId Int
+  organiser   Organiser @relation(fields: [organiserId], references: [id])
+  matchId     Int
+  match       Match     @relation(fields: [matchId], references: [id])
+  action      String
+  before      Json
+  after       Json
+  at          DateTime  @default(now())
+
+  @@index([matchId])
+}
+
+model ScoringSession {
+  id          Int        @id @default(autoincrement())
+  matchId     Int        @unique
+  match       Match      @relation(fields: [matchId], references: [id])
+  setup       Json
+  events      Json
+  submitted   Boolean    @default(false)
+  updatedById Int?
+  updatedBy   Organiser? @relation(fields: [updatedById], references: [id])
+  updatedAt   DateTime   @updatedAt
+}

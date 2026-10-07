@@ -1,0 +1,112 @@
+@import "tailwindcss";
+
+/* Palette shared with the SJC Sportsfest 2026 combined schedule. */
+:root {
+  color-scheme: light;
+  --ground: #edf0f3;
+  --surface: #ffffff;
+  --ink: #111a24;
+  --muted: #5a6774;
+  --line: #d6dce2;
+  --soft: #f5f7f9;
+  /* Sport colours: basketball, cricket, volleyball, football. Cricket green is this site's accent. */
+  --bb: #c4531c;
+  --cr: #2b7747;
+  --vb: #2a61a6;
+  --fb: #7b3c9e;
+  --bb-t: #fbede5;
+  --cr-t: #e6f2ea;
+  --vb-t: #e6eef8;
+  --fb-t: #f2e9f7;
+  --clash: #b3261e;
+  --clash-t: #fcebea;
+  --focus: #2a61a6;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground: #0e141a;
+    --surface: #151d25;
+    --ink: #e6ebf0;
+    --muted: #95a3b0;
+    --line: #26323e;
+    --soft: #1b242e;
+    --bb: #f08a55;
+    --cr: #62c18a;
+    --vb: #72a5ec;
+    --fb: #c08be0;
+    --bb-t: #3a2216;
+    --cr-t: #16301f;
+    --vb-t: #172a42;
+    --fb-t: #2c1c38;
+    --clash: #ff8a80;
+    --clash-t: #3a1a18;
+    --focus: #72a5ec;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #0e141a;
+  --surface: #151d25;
+  --ink: #e6ebf0;
+  --muted: #95a3b0;
+  --line: #26323e;
+  --soft: #1b242e;
+  --bb: #f08a55;
+  --cr: #62c18a;
+  --vb: #72a5ec;
+  --fb: #c08be0;
+  --bb-t: #3a2216;
+  --cr-t: #16301f;
+  --vb-t: #172a42;
+  --fb-t: #2c1c38;
+  --clash: #ff8a80;
+  --clash-t: #3a1a18;
+  --focus: #72a5ec;
+}
+
+@theme inline {
+  --color-background: var(--ground);
+  --color-foreground: var(--ink);
+  --color-card: var(--surface);
+  --color-soft: var(--soft);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-cricket: var(--cr);
+  --color-cricket-tint: var(--cr-t);
+  --color-warn: var(--bb);
+  --color-warn-tint: var(--bb-t);
+  --color-danger: var(--clash);
+  --color-danger-tint: var(--clash-t);
+  --color-focus: var(--focus);
+  --color-win: var(--cr);
+  --color-loss: var(--clash);
+  --color-qualify: var(--cr-t);
+  /* Groups use the four sport colours: A orange, B purple, C green, D blue. */
+  --color-group-a: var(--bb);
+  --color-group-a-tint: var(--bb-t);
+  --color-group-b: var(--fb);
+  --color-group-b-tint: var(--fb-t);
+  --color-group-c: var(--cr);
+  --color-group-c-tint: var(--cr-t);
+  --color-group-d: var(--vb);
+  --color-group-d-tint: var(--vb-t);
+  --font-sans: var(--font-plex), system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: var(--font-barlow), "Arial Narrow", Arial, sans-serif;
+}
+
+body {
+  background: var(--ground);
+  color: var(--ink);
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
