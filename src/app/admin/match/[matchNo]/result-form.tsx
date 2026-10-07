@@ -28,8 +28,6 @@ interface Props {
     score2: number | null;
     winnerId: number | null;
     note: string;
-    date: string;
-    time: string;
   };
 }
 
@@ -121,17 +119,6 @@ export function ResultForm({ matchNo, knockout, teams, initial }: Props) {
       )}
 
       {status === "COMPLETED" && tied && !knockout && <p className="text-sm text-muted">Level scores: recorded as a draw, 1 point each.</p>}
-
-      <div className="grid grid-cols-2 gap-3">
-        <label className="block text-sm">
-          <span className="mb-1 block font-medium">Date</span>
-          <input type="date" name="date" defaultValue={initial.date} required className={inputClass} />
-        </label>
-        <label className="block text-sm">
-          <span className="mb-1 block font-medium">Start (UAE)</span>
-          <input type="time" name="time" defaultValue={initial.time} required className={inputClass} />
-        </label>
-      </div>
 
       <label className="block text-sm">
         <span className="mb-1 block font-medium">Note (optional, shown publicly)</span>

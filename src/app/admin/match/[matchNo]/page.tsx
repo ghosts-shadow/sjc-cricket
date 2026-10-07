@@ -5,7 +5,7 @@ import { Suspense } from "react";
 import { requireOrganiser } from "@/lib/auth";
 import { getTournament } from "@/lib/data";
 import { prisma } from "@/lib/db";
-import { formatLongDay, formatStamp, formatTime, toDubaiInputs } from "@/lib/format";
+import { formatDay, formatLongDay, formatStamp, formatTime } from "@/lib/format";
 import { ResultForm } from "./result-form";
 
 export const metadata: Metadata = { title: "Enter result", robots: { index: false } };
@@ -32,11 +32,33 @@ async function MatchAdmin({ params }: { params: PageProps<"/admin/match/[matchNo
     take: 10,
   });
   const teamName = new Map(teams.map((t) => [t.id, t.name]));
-  const describe = (s: unknown) => {
-    const v = s as { status: string; score1: number | null; score2: number | null; winnerId: number | null };
+  type Snap = {
+    status: string;
+    score1: number | null;
+    score2: number | null;
+    winnerId: number | null;
+    team1Id: number | null;
+    team2Id: number | null;
+    startsAt?: string;
+    note?: string | null;
+  };
+  const describe = (v: Snap) => {
     const score = v.score1 != null ? ` ${v.score1}–${v.score2}` : "";
     const winner = v.winnerId != null ? ` (${teamName.get(v.winnerId)})` : "";
     return `${v.status.toLowerCase().replace("_", " ")}${score}${winner}`;
+  };
+  const when = (iso: string) => `${formatDay(iso)} ${formatTime(iso)}`;
+  const teamsOf = (v: Snap) => `${teamName.get(v.team1Id ?? -1) ?? "TBC"} v ${teamName.get(v.team2Id ?? -1) ?? "TBC"}`;
+  /** One line per audit entry, naming only what changed. */
+  const describeChange = (beforeJson: unknown, afterJson: unknown) => {
+    const before = beforeJson as Snap;
+    const after = afterJson as Snap;
+    const parts: string[] = [];
+    if (describe(before) !== describe(after)) parts.push(`${describe(before)} → ${describe(after)}`);
+    if (before.startsAt && after.startsAt && before.startsAt !== after.startsAt) parts.push(`time ${when(before.startsAt)} → ${when(after.startsAt)}`);
+    if (teamsOf(before) !== teamsOf(after)) parts.push(`teams ${teamsOf(before)} → ${teamsOf(after)}`);
+    if ((before.note ?? null) !== (after.note ?? null)) parts.push("note changed");
+    return parts.join(" · ") || "saved, no changes";
   };
 
   return (
@@ -47,7 +69,10 @@ async function MatchAdmin({ params }: { params: PageProps<"/admin/match/[matchNo
         </Link>
         <h1 className="mt-2 font-display text-3xl font-semibold leading-tight sm:text-4xl">{match.label}</h1>
         <p className="mt-1 text-sm text-muted">
-          {formatLongDay(match.startsAt)} · {formatTime(match.startsAt)}
+          {formatLongDay(match.startsAt)} · {formatTime(match.startsAt)} ·{" "}
+          <Link href={`/admin/fixtures/${matchNo}`} className="underline underline-offset-2">
+            Change time or teams
+          </Link>
         </p>
       </div>
 
@@ -65,7 +90,6 @@ async function MatchAdmin({ params }: { params: PageProps<"/admin/match/[matchNo
           score2: match.score2,
           winnerId: match.winnerId,
           note: match.note ?? "",
-          ...toDubaiInputs(match.startsAt),
         }}
       />
 
@@ -75,7 +99,7 @@ async function MatchAdmin({ params }: { params: PageProps<"/admin/match/[matchNo
           <ul className="space-y-1 text-xs text-muted">
             {history.map((h) => (
               <li key={h.id}>
-                {formatStamp(h.at.toISOString())} · {h.organiser.name}: {describe(h.before)} → {describe(h.after)}
+                {formatStamp(h.at.toISOString())} · {h.organiser.name}: {describeChange(h.before, h.after)}
               </li>
             ))}
           </ul>

@@ -65,6 +65,9 @@ model Match {
   stage    Stage
   group    String?
   startsAt DateTime
+  // The published time before the first reschedule or delay, so pages can say "was 5:00 PM".
+  // Null when the match is at its original time.
+  originalStartsAt DateTime?
   // Knockout teams stay null until known; slot1/slot2 say where they come from ("A1", "W46").
   team1Id  Int?
   team1    Team?       @relation("team1", fields: [team1Id], references: [id])

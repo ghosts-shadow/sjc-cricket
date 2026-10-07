@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { namesBySide, parseEvents, parseSetup, replay, summariseOver, type Ball, type ScoreEvent } from "./scoring";
+import { namesBySide, parseEvents, parseSetup, replay, summariseOver, swapBattingFirst, type Ball, type ScoreEvent } from "./scoring";
 
 describe("parseEvents / parseSetup", () => {
   it("accepts well-formed events and strips unknown fields", () => {
@@ -219,6 +219,24 @@ describe("batters and bowlers", () => {
       ...sixes(1),
     ]);
     expect(namesBySide(card)).toEqual({ 1: ["Xavier"], 2: ["Anil", "Ben"] });
+  });
+
+  it("swapBattingFirst flips the order, keeps balls and penalties, and drops names", () => {
+    const events: ScoreEvent[] = [
+      { type: "batters", names: ["Anil", "Ben"] },
+      { type: "bowler", name: "Xavier" },
+      ...over([run(4), run(2)]),
+      { type: "penalty", team: 2, runs: 5, note: "Misconduct" },
+    ];
+    const swapped = swapBattingFirst({ battingFirst: 1 }, events);
+    expect(swapped.setup).toEqual({ battingFirst: 2 });
+    expect(swapped.events).toEqual([...over([run(4), run(2)]), { type: "penalty", team: 2, runs: 5, note: "Misconduct" }]);
+
+    const card = replay(swapped.setup, swapped.events);
+    expect(card.innings[0].battingTeam).toBe(2);
+    expect(card.innings[0].runs).toBe(6); // the balls now count for team 2
+    expect(card.totals).toEqual({ 1: 0, 2: 1 }); // and team 2 still carries its own -5 penalty
+    expect(card.innings[0].pairs[0]).toBeNull();
   });
 
   it("parseEvents cleans names and rejects bad ones", () => {

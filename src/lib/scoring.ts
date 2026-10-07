@@ -304,6 +304,18 @@ export function replay(setup: ScoringSetup, events: ScoreEvent[]): Scorecard {
   return { innings, current, penalties, totals, target, finished, result, warnings };
 }
 
+/**
+ * Fix a wrong toss: the other team bats first. Balls already scored move with the batting order
+ * (that's the point of the fix), but batter and bowler names were picked from the wrong teams'
+ * lists, so they're dropped. Penalties stay with the team they were given to.
+ */
+export function swapBattingFirst(setup: ScoringSetup, events: ScoreEvent[]): { setup: ScoringSetup; events: ScoreEvent[] } {
+  return {
+    setup: { battingFirst: setup.battingFirst === 1 ? 2 : 1 },
+    events: events.filter((e) => e.type !== "batters" && e.type !== "bowler"),
+  };
+}
+
 /** Every player name in a scorecard, by side: batters belong to the batting side, bowlers to the other. */
 export function namesBySide(card: Scorecard): { 1: string[]; 2: string[] } {
   const names = { 1: new Map<string, string>(), 2: new Map<string, string>() };

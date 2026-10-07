@@ -8,6 +8,7 @@ import {
   namesBySide,
   OVERS_PER_INNINGS,
   replay,
+  swapBattingFirst,
   type Ball,
   type OverCard,
   type PairNames,
@@ -160,6 +161,19 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
     setError(null);
   };
   const push = (event: ScoreEvent) => pushMany([event]);
+  const changeBattingFirst = () => {
+    if (!setup) return;
+    const next = setup.battingFirst === 1 ? 2 : 1;
+    const balls = events.filter((e) => e.type === "ball").length;
+    const detail = balls
+      ? `\n\nThe ${balls} ball${balls === 1 ? "" : "s"} already scored will count for ${teamName(next)} instead, and the batter and bowler names picked so far will be cleared.`
+      : "";
+    if (!window.confirm(`Change the toss so ${teamName(next)} bats first?${detail}`)) return;
+    change((d) => (d.setup ? swapBattingFirst(d.setup, d.events) : d));
+    setNbPending(false);
+    setEditingPlayers(false);
+    setError(null);
+  };
   const ball = (b: Ball) => push({ type: "ball", ball: b });
   const undo = () => {
     change((d) => ({ setup: d.setup, events: d.events.slice(0, -1) }));
@@ -256,7 +270,10 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
           <div className="flex items-start justify-between gap-2">
             <div>
               <p className="text-xs text-muted">
-                Innings {inningsIndex! + 1} · {teamName(battingTeam)} batting
+                Innings {inningsIndex! + 1} · {teamName(battingTeam)} batting ·{" "}
+                <button onClick={changeBattingFirst} className="underline underline-offset-2">
+                  Change who bats first
+                </button>
               </p>
               <p className="font-semibold">
                 Pair {Math.floor(overIndex / 2) + 1} · Over {overIndex + 1} of {OVERS_PER_INNINGS}

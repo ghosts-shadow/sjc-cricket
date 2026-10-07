@@ -25,6 +25,21 @@ export const dayKey = (iso: string) => keyFormat.format(new Date(iso));
 /** "Wed 7 Oct, 3:15 pm" */
 export const formatStamp = (iso: string) => stampFormat.format(new Date(iso));
 
+/**
+ * How a match's time has changed, for public pages. Null if it's at its original time.
+ * Same day, up to an hour: "Delayed 20 min (was 5:00 PM)". Bigger same-day moves (e.g. two matches
+ * swapping slots): "Rescheduled (was 5:00 PM)". Different day: "Moved from Sat 3 Oct, 7:00 PM".
+ */
+export function timeChangeText(startsAt: string, originalStartsAt: string | null): string | null {
+  if (!originalStartsAt) return null;
+  const diff = Math.round((Date.parse(startsAt) - Date.parse(originalStartsAt)) / 60_000);
+  if (diff === 0) return null;
+  if (dayKey(startsAt) !== dayKey(originalStartsAt)) return `Moved from ${formatDay(originalStartsAt)}, ${formatTime(originalStartsAt)}`;
+  const was = `(was ${formatTime(originalStartsAt)})`;
+  if (Math.abs(diff) > 60) return `Rescheduled ${was}`;
+  return diff > 0 ? `Delayed ${diff} min ${was}` : `Brought forward ${-diff} min ${was}`;
+}
+
 /** For <input type="date"> / <input type="time"> in UAE time. */
 export function toDubaiInputs(iso: string): { date: string; time: string } {
   const d = new Date(new Date(iso).getTime() + 4 * 60 * 60 * 1000);

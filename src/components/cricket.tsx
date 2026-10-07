@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { MatchView } from "@/lib/data";
-import { dayKey, formatDay, formatLongDay, formatTime } from "@/lib/format";
+import { dayKey, formatDay, formatLongDay, formatTime, timeChangeText } from "@/lib/format";
 import { formatNrr, QUALIFIERS_PER_GROUP, type StandingRow, type TeamLite } from "@/lib/tournament";
 
 const GROUP_COLOURS: Record<string, string> = {
@@ -77,6 +77,8 @@ export function MatchCard({ match, showDate = false }: { match: MatchView; showD
   const homeWon = match.winner != null && match.winner.id === match.home?.id;
   const awayWon = match.winner != null && match.winner.id === match.away?.id;
   const line = resultLine(match);
+  const moved = match.finished ? null : timeChangeText(match.startsAt, match.originalStartsAt);
+  const footer = [moved, line, match.note].filter(Boolean).join(" · ");
 
   return (
     <article className="rounded-lg border border-line bg-card p-3 shadow-sm">
@@ -100,11 +102,11 @@ export function MatchCard({ match, showDate = false }: { match: MatchView; showD
           {played && <span className={`tabular font-display text-xl leading-none ${awayWon ? "font-semibold" : "font-medium text-muted"}`}>{match.score2}</span>}
         </div>
       </div>
-      {(line || match.note) && (
+      {footer && (
         <p className="mt-2 border-t border-line pt-2 text-xs text-muted">
-          {line}
-          {line && match.note && " · "}
-          {match.note}
+          {moved && <span className="font-medium text-warn">{moved}</span>}
+          {moved && footer !== moved && " · "}
+          {[line, match.note].filter(Boolean).join(" · ")}
         </p>
       )}
     </article>

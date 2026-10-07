@@ -44,7 +44,10 @@ async function Dashboard() {
           <h1 className="font-display text-3xl font-semibold leading-tight sm:text-4xl">Results</h1>
           <p className="mt-1 text-sm text-muted">Signed in as {organiser.name}. Every change is logged with your name.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Link href="/admin/fixtures" className="rounded-md border border-line px-3 py-1.5 text-sm hover:border-muted">
+            Fixtures &amp; delays
+          </Link>
           <Link href="/admin/contacts" className="rounded-md border border-line px-3 py-1.5 text-sm hover:border-muted">
             Team contacts
           </Link>

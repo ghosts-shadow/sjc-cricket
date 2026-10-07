@@ -8,11 +8,12 @@ import type { MatchStatus, Prisma } from "@prisma/client";
 import { requireOrganiser } from "@/lib/auth";
 import { TOURNAMENT_TAG } from "@/lib/data";
 import { prisma } from "@/lib/db";
-import { fromDubaiInputs } from "@/lib/format";
+import { dayKey, fromDubaiInputs } from "@/lib/format";
 import { SESSION_COOKIE, SESSION_DAYS, signSession } from "@/lib/session-token";
 
 export interface FormState {
   error?: string;
+  message?: string;
 }
 
 const MAX_FAILED_LOGINS = 5;
@@ -148,16 +149,15 @@ export async function saveResult(_prev: FormState, formData: FormData): Promise<
     if (winnerId !== team1Id && winnerId !== team2Id) return { error: "Pick the team that gets the walkover." };
   }
 
-  const date = String(formData.get("date") ?? "");
-  const time = String(formData.get("time") ?? "");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) return { error: "Enter a valid date and time." };
-  const startsAt = fromDubaiInputs(date, time);
+  const note = readNote(formData);
 
-  const note = String(formData.get("note") ?? "").trim().slice(0, 200) || null;
-
-  const after = { status, score1, score2, winnerId, team1Id, team2Id, startsAt, note };
+  // Times are changed on the fixtures page, never here, so a reschedule can't be saved as a result.
+  const after = { status, score1, score2, winnerId, team1Id, team2Id, startsAt: match.startsAt, note };
   await prisma.$transaction([
-    prisma.match.update({ where: { id: match.id }, data: { ...after, updatedById: organiser.organiserId } }),
+    prisma.match.update({
+      where: { id: match.id },
+      data: { status, score1, score2, winnerId, team1Id, team2Id, note, updatedById: organiser.organiserId },
+    }),
     prisma.auditLog.create({
       data: {
         organiserId: organiser.organiserId,
@@ -171,4 +171,122 @@ export async function saveResult(_prev: FormState, formData: FormData): Promise<
 
   updateTag(TOURNAMENT_TAG);
   redirect(`/admin#match-${matchNo}`);
+}
+
+function readNote(formData: FormData): string | null {
+  return String(formData.get("note") ?? "").trim().slice(0, 200) || null;
+}
+
+const unplayed = (status: MatchStatus) => status === "SCHEDULED" || status === "POSTPONED";
+
+/** New start time, remembering the first published time so public pages can say "was 5:00 PM". */
+function retime(m: { startsAt: Date; originalStartsAt: Date | null }, startsAt: Date) {
+  const original = m.originalStartsAt ?? m.startsAt;
+  return { startsAt, originalStartsAt: original.getTime() === startsAt.getTime() ? null : original };
+}
+
+/** "Running late": shift every unplayed match from one match onward, on that match's day. */
+export async function delayMatches(_prev: FormState, formData: FormData): Promise<FormState> {
+  const organiser = await requireOrganiser();
+  const fromMatchNo = Number(formData.get("fromMatchNo"));
+  const minutes = Number(formData.get("minutes"));
+  if (!Number.isInteger(minutes) || minutes === 0 || Math.abs(minutes) > 240) {
+    return { error: "Enter whole minutes, up to 240 (negative to start earlier)." };
+  }
+
+  const all = await prisma.match.findMany({ orderBy: [{ startsAt: "asc" }, { matchNo: "asc" }] });
+  const from = all.find((m) => m.matchNo === fromMatchNo);
+  if (!from) return { error: "Pick the first match to move." };
+  const day = dayKey(from.startsAt.toISOString());
+  const sameDay = all.filter((m) => dayKey(m.startsAt.toISOString()) === day);
+  const toMove = sameDay.slice(sameDay.indexOf(from)).filter((m) => m.status === "SCHEDULED");
+  if (toMove.length === 0) return { error: "No unplayed matches from that one onward." };
+
+  await prisma.$transaction(
+    toMove.flatMap((m) => {
+      const data = retime(m, new Date(m.startsAt.getTime() + minutes * 60_000));
+      return [
+        prisma.match.update({ where: { id: m.id }, data: { ...data, updatedById: organiser.organiserId } }),
+        prisma.auditLog.create({
+          data: { organiserId: organiser.organiserId, matchId: m.id, action: "delay", before: snapshot(m), after: snapshot({ ...m, ...data }) },
+        }),
+      ];
+    }),
+  );
+
+  updateTag(TOURNAMENT_TAG);
+  const count = `${toMove.length} match${toMove.length === 1 ? "" : "es"}`;
+  return { message: `Moved ${count} ${Math.abs(minutes)} min ${minutes > 0 ? "later" : "earlier"} (from match ${fromMatchNo}).` };
+}
+
+/** Change a fixture's date/time, teams (group matches: same group only) and public note. */
+export async function saveFixture(_prev: FormState, formData: FormData): Promise<FormState> {
+  const organiser = await requireOrganiser();
+  const matchNo = Number(formData.get("matchNo"));
+  const match = await prisma.match.findUnique({ where: { matchNo } });
+  if (!match) return { error: "Match not found." };
+
+  const date = String(formData.get("date") ?? "");
+  const time = String(formData.get("time") ?? "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) return { error: "Enter a valid date and time." };
+  const startsAt = fromDubaiInputs(date, time);
+
+  let { team1Id, team2Id } = match;
+  if (match.stage === "GROUP") {
+    team1Id = parseTeamId(formData.get("team1Id"));
+    team2Id = parseTeamId(formData.get("team2Id"));
+    if (team1Id == null || team2Id == null) return { error: "Pick both teams." };
+    if (team1Id === team2Id) return { error: "A team can't play itself." };
+    const inGroup = await prisma.team.count({ where: { id: { in: [team1Id, team2Id] }, group: match.group ?? "" } });
+    if (inGroup !== 2) return { error: `Both teams must be in Group ${match.group}.` };
+    if (!unplayed(match.status) && (team1Id !== match.team1Id || team2Id !== match.team2Id)) {
+      return { error: "This match has a result. Set it back to “Not played yet” on the result page before changing the teams." };
+    }
+  }
+
+  const moved = startsAt.getTime() !== match.startsAt.getTime();
+  const data = {
+    team1Id,
+    team2Id,
+    note: readNote(formData),
+    ...(moved ? retime(match, startsAt) : {}),
+    // A postponed match that gets a new time is back on the schedule.
+    ...(moved && match.status === "POSTPONED" ? { status: "SCHEDULED" as const } : {}),
+  };
+  await prisma.$transaction([
+    prisma.match.update({ where: { id: match.id }, data: { ...data, updatedById: organiser.organiserId } }),
+    prisma.auditLog.create({
+      data: { organiserId: organiser.organiserId, matchId: match.id, action: "fixture", before: snapshot(match), after: snapshot({ ...match, ...data }) },
+    }),
+  ]);
+
+  updateTag(TOURNAMENT_TAG);
+  redirect(`/admin/fixtures#match-${matchNo}`);
+}
+
+/** Swap the time slots of two unplayed matches (e.g. a team arrives late). */
+export async function swapSlots(_prev: FormState, formData: FormData): Promise<FormState> {
+  const organiser = await requireOrganiser();
+  const [a, b] = await Promise.all([
+    prisma.match.findUnique({ where: { matchNo: Number(formData.get("matchNo")) } }),
+    prisma.match.findUnique({ where: { matchNo: Number(formData.get("otherMatchNo")) } }),
+  ]);
+  if (!a || !b || a.id === b.id) return { error: "Pick another match to swap with." };
+  if (!unplayed(a.status) || !unplayed(b.status)) return { error: "Only unplayed matches can swap slots." };
+
+  const aData = retime(a, b.startsAt);
+  const bData = retime(b, a.startsAt);
+  await prisma.$transaction([
+    prisma.match.update({ where: { id: a.id }, data: { ...aData, updatedById: organiser.organiserId } }),
+    prisma.match.update({ where: { id: b.id }, data: { ...bData, updatedById: organiser.organiserId } }),
+    prisma.auditLog.create({
+      data: { organiserId: organiser.organiserId, matchId: a.id, action: "swap", before: snapshot(a), after: snapshot({ ...a, ...aData }) },
+    }),
+    prisma.auditLog.create({
+      data: { organiserId: organiser.organiserId, matchId: b.id, action: "swap", before: snapshot(b), after: snapshot({ ...b, ...bData }) },
+    }),
+  ]);
+
+  updateTag(TOURNAMENT_TAG);
+  redirect(`/admin/fixtures#match-${a.matchNo}`);
 }

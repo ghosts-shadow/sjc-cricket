@@ -18,6 +18,8 @@ export const TOURNAMENT_TAG = "tournament";
 export interface MatchView extends MatchLite {
   id: number;
   startsAt: string;
+  /** Set when the match was moved or delayed; see timeChangeText(). */
+  originalStartsAt: string | null;
   note: string | null;
   label: string;
   home: TeamLite | null;
@@ -76,6 +78,7 @@ export async function getTournament(): Promise<Tournament> {
       ...m,
       id: row.id,
       startsAt: row.startsAt.toISOString(),
+      originalStartsAt: row.originalStartsAt?.toISOString() ?? null,
       note: row.note,
       label: matchLabel(m),
       home,
