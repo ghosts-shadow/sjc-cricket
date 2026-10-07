@@ -10,6 +10,7 @@ import { requireOrganiser } from "@/lib/auth";
 import { TOURNAMENT_TAG } from "@/lib/data";
 import { prisma } from "@/lib/db";
 import { dayKey, fromDubaiInputs, isPastDay } from "@/lib/format";
+import { cleanName, MAX_NAME_LENGTH } from "@/lib/scoring";
 import { clearSession, reopenSession } from "@/lib/scoring-sessions";
 import { SESSION_COOKIE, SESSION_DAYS, signSession } from "@/lib/session-token";
 
@@ -168,6 +169,59 @@ export async function clearScoring(_prev: FormState, formData: FormData): Promis
   if (error) return { error };
   refresh();
   return { message: "Live scoring cleared. The scorer starts again from the toss." };
+}
+
+/** Team contacts: put an individual registration on a team's roster. */
+export async function placePlayer(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireOrganiser();
+  const playerId = parseTeamId(formData.get("playerId"));
+  const teamId = parseTeamId(formData.get("teamId"));
+  if (playerId == null || teamId == null) return { error: "Pick a team." };
+  const [player, team] = await Promise.all([
+    prisma.player.findUnique({ where: { id: playerId } }),
+    prisma.team.findUnique({ where: { id: teamId }, include: { players: { select: { name: true } } } }),
+  ]);
+  if (!player || !team) return { error: "Player or team not found." };
+  if (player.teamId != null) return { error: `${player.name} is already on a team.` };
+  if (team.players.some((p) => p.name.toLowerCase() === player.name.toLowerCase())) {
+    return { error: `${team.name} already has a player called ${player.name}.` };
+  }
+  await prisma.player.update({ where: { id: player.id }, data: { teamId } });
+  refresh();
+  return {};
+}
+
+/**
+ * Team contacts: take a player off a team. Individual registrations go back to the unplaced list;
+ * players added by an organiser or a scorer are deleted. Team-form players can't be removed here.
+ */
+export async function removePlayer(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireOrganiser();
+  const playerId = parseTeamId(formData.get("playerId"));
+  const player = playerId == null ? null : await prisma.player.findUnique({ where: { id: playerId } });
+  if (!player) return { error: "Player not found." };
+  if (player.source === "form") return { error: "Players from the team's registration form can't be removed here." };
+  if (player.source === "individual") await prisma.player.update({ where: { id: player.id }, data: { teamId: null } });
+  else await prisma.player.delete({ where: { id: player.id } });
+  refresh();
+  return {};
+}
+
+/** Team contacts: an organiser types in a player for a team (e.g. a squad that registered on paper). */
+export async function addPlayer(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireOrganiser();
+  const teamId = parseTeamId(formData.get("teamId"));
+  const name = cleanName(formData.get("name"));
+  if (teamId == null) return { error: "Team not found." };
+  if (!name) return { error: `Type a name (up to ${MAX_NAME_LENGTH} characters).` };
+  const genderValue = String(formData.get("gender") ?? "");
+  const female = genderValue === "F" ? true : genderValue === "M" ? false : null;
+  const team = await prisma.team.findUnique({ where: { id: teamId }, include: { players: { select: { name: true } } } });
+  if (!team) return { error: "Team not found." };
+  if (team.players.some((p) => p.name.toLowerCase() === name.toLowerCase())) return { error: `${team.name} already has ${name}.` };
+  await prisma.player.create({ data: { teamId, name, female, source: "organiser" } });
+  refresh();
+  return { message: `Added ${name}.` };
 }
 
 function readNote(formData: FormData): string | null {

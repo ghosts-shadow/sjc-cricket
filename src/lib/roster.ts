@@ -26,13 +26,13 @@ export async function saveRosterNames(teamIds: TeamIds, setup: ScoringSetup, eve
 
   const existing = await prisma.player.findMany({ where: { teamId: { in: [teamIds[1], teamIds[2]] } } });
   const have = new Set(existing.map((p) => `${p.teamId}:${p.name.toLowerCase()}`));
-  const data: { teamId: number; name: string }[] = [];
+  const data: { teamId: number; name: string; source: string }[] = [];
   for (const side of [1, 2] as const) {
     for (const name of used[side]) {
       const key = `${teamIds[side]}:${name.toLowerCase()}`;
       if (have.has(key)) continue;
       have.add(key);
-      data.push({ teamId: teamIds[side], name });
+      data.push({ teamId: teamIds[side], name, source: "scorer" });
     }
   }
   if (data.length) await prisma.player.createMany({ data, skipDuplicates: true });

@@ -1,6 +1,6 @@
 // SJC Sports Fest cricket. Public pages show team names only. Organiser-only data: player names
-// and gender, and each team captain's contact details (for reaching teams).
-// Never store Emirates IDs, parish registration numbers or ages.
+// and gender, each team captain's contact details, and individual registrants' phone and email
+// (for reaching players). Never store Emirates IDs, parish registration numbers or ages.
 
 generator client {
   provider = "prisma-client-js"
@@ -49,11 +49,19 @@ model Team {
 // A team's roster for the scorer's batter/bowler dropdowns. Grows from names used in scoring.
 model Player {
   id        Int      @id @default(autoincrement())
-  teamId    Int
-  team      Team     @relation(fields: [teamId], references: [id])
+  // Null = an individual registration not yet placed on a team by an organiser.
+  teamId    Int?
+  team      Team?    @relation(fields: [teamId], references: [id])
   name      String
   // From the registration form when known; null for players first added at the ground.
   female    Boolean?
+  // Individual registrations only (team forms give no per-player contact). Organiser screens only.
+  phone     String?
+  email     String?
+  // Where the player came from: "form" (team registration), "individual" (individual registration),
+  // "organiser" (added on the Team contacts page) or "scorer" (+ Add player in the scorer).
+  // Form players can't be removed in the app; the others can.
+  source    String   @default("form")
   createdAt DateTime @default(now())
 
   @@unique([teamId, name])
