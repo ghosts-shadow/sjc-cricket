@@ -6,6 +6,7 @@ import { requireOrganiser } from "@/lib/auth";
 import { getTournament, TOURNAMENT_TAG } from "@/lib/data";
 import { prisma } from "@/lib/db";
 import { saveRosterNames } from "@/lib/roster";
+import { clearSession } from "@/lib/scoring-sessions";
 import { parseEvents, parseSetup, replay, type ScoreEvent, type ScoringSetup } from "@/lib/scoring";
 
 export interface ScoringResult {
@@ -36,6 +37,15 @@ export async function syncScoring(matchNo: number, setupInput: unknown, eventsIn
   });
   await rememberPlayers(matchNo, setup, events);
   return { ok: true };
+}
+
+/** Scorer's "Start this match over": delete the unsubmitted session so it restarts from the toss. */
+export async function resetScoring(matchNo: number): Promise<ScoringResult> {
+  const organiser = await requireOrganiser();
+  const session = await prisma.scoringSession.findFirst({ where: { match: { matchNo } } });
+  if (session?.submitted) return { ok: false, error: "This match was already submitted. Reopen it from the result page first." };
+  const error = await clearSession(organiser.organiserId, matchNo);
+  return error ? { ok: false, error } : { ok: true };
 }
 
 /** Grow both teams' rosters from the names in this session. Never fails the save it rides on. */

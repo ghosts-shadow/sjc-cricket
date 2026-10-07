@@ -24,6 +24,8 @@ export const formatTime = (iso: string) => timeFormat.format(new Date(iso));
 export const dayKey = (iso: string) => keyFormat.format(new Date(iso));
 /** "Wed 7 Oct, 3:15 pm" */
 export const formatStamp = (iso: string) => stampFormat.format(new Date(iso));
+/** True for match days before today (UAE). Pages must be dynamic (e.g. after connection()) to call this. */
+export const isPastDay = (iso: string) => dayKey(iso) < dayKey(new Date().toISOString());
 
 /**
  * How a match's time has changed, for public pages. Null if it's at its original time.

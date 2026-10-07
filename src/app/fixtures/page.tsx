@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { connection } from "next/server";
 import { Suspense } from "react";
-import { GroupBadge, MatchDays } from "@/components/cricket";
+import { GroupBadge, MatchDays, PastToggle } from "@/components/cricket";
 import { getTournament } from "@/lib/data";
+import { dayKey } from "@/lib/format";
 import { GROUPS } from "@/lib/tournament";
 
 export const metadata: Metadata = { title: "Fixtures & results" };
@@ -20,13 +22,26 @@ export default function FixturesPage(props: PageProps<"/fixtures">) {
   );
 }
 
+/** /fixtures?group=B&past=1, leaving out defaults so the plain URL stays /fixtures. */
+function fixturesHref(group: string, past: boolean): string {
+  const query = new URLSearchParams();
+  if (group !== "all") query.set("group", group);
+  if (past) query.set("past", "1");
+  const qs = query.toString();
+  return qs ? `/fixtures?${qs}` : "/fixtures";
+}
+
 async function FilteredFixtures({ searchParams }: { searchParams: PageProps<"/fixtures">["searchParams"] }) {
-  const raw = (await searchParams).group;
-  const filter = typeof raw === "string" && FILTERS.some((f) => f.key === raw) ? raw : "all";
+  const params = await searchParams;
+  const filter = typeof params.group === "string" && FILTERS.some((f) => f.key === params.group) ? params.group : "all";
+  const showPast = params.past === "1";
+  await connection();
+  const today = dayKey(new Date().toISOString());
+
   const { matches } = await getTournament();
-  const shown = matches.filter((m) =>
-    filter === "all" ? true : filter === "ko" ? m.stage !== "GROUP" : m.group === filter,
-  );
+  const inFilter = matches.filter((m) => (filter === "all" ? true : filter === "ko" ? m.stage !== "GROUP" : m.group === filter));
+  const pastCount = inFilter.filter((m) => dayKey(m.startsAt) < today).length;
+  const shown = showPast ? inFilter : inFilter.filter((m) => dayKey(m.startsAt) >= today);
 
   return (
     <>
@@ -34,7 +49,7 @@ async function FilteredFixtures({ searchParams }: { searchParams: PageProps<"/fi
         {FILTERS.map((f) => (
           <Link
             key={f.key}
-            href={f.key === "all" ? "/fixtures" : `/fixtures?group=${f.key}`}
+            href={fixturesHref(f.key, showPast)}
             className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm ${
               f.key === filter ? "border-edge bg-raised text-foreground" : "border-line text-muted hover:text-foreground"
             }`}
@@ -43,8 +58,9 @@ async function FilteredFixtures({ searchParams }: { searchParams: PageProps<"/fi
             {f.label}
           </Link>
         ))}
+        <PastToggle showPast={showPast} pastCount={pastCount} href={fixturesHref(filter, !showPast)} />
       </nav>
-      <MatchDays matches={shown} />
+      <MatchDays matches={shown} emptyText={pastCount ? "No more matches to come. Show past matches to see the results." : "No matches."} />
     </>
   );
 }

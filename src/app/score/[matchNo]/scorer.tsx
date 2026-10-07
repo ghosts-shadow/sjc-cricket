@@ -16,7 +16,7 @@ import {
   type ScoreEvent,
   type ScoringSetup,
 } from "@/lib/scoring";
-import { submitScoring, syncScoring } from "../actions";
+import { resetScoring, submitScoring, syncScoring } from "../actions";
 
 type Rosters = { 1: string[]; 2: string[] };
 
@@ -114,6 +114,7 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
   const [added, setAdded] = useState<Rosters>({ 1: [], 2: [] });
   const [editingPlayers, setEditingPlayers] = useState(false);
   const [submitting, startSubmit] = useTransition();
+  const [resetting, startReset] = useTransition();
   const { setup, events } = doc;
 
   // Save every change to the phone at once, and to the server shortly after.
@@ -161,6 +162,28 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
     setError(null);
   };
   const push = (event: ScoreEvent) => pushMany([event]);
+  const startOver = () => {
+    const balls = events.filter((e) => e.type === "ball").length;
+    const lost = balls ? ` All ${balls} ball${balls === 1 ? "" : "s"} scored so far will be deleted, on this phone and on the server.` : "";
+    if (!window.confirm(`Start this match over?${lost} You'll pick who bats first again.`)) return;
+    const previous = doc;
+    setDoc({ setup: null, events: [], rev: 0 }); // also cancels any pending background save
+    setNbPending(false);
+    setEditingPlayers(false);
+    setError(null);
+    startReset(async () => {
+      try {
+        const res = await resetScoring(matchNo);
+        if (!res.ok) throw new Error(res.error);
+        try {
+          localStorage.removeItem(storageKey);
+        } catch {}
+      } catch (err) {
+        setDoc(previous); // nothing was deleted on the server, so put the match back
+        setError(err instanceof Error && err.message ? err.message : "Couldn't start over without a connection. Try again when you're online.");
+      }
+    });
+  };
   const changeBattingFirst = () => {
     if (!setup) return;
     const next = setup.battingFirst === 1 ? 2 : 1;
@@ -259,6 +282,13 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
       {submitted && (
         <div className="rounded-lg border border-win/50 bg-win-tint p-4 text-sm">
           <p className="font-semibold">Result submitted. The public site is updated.</p>
+          <p className="mt-1 text-muted">
+            Something wrong? Reopen live scoring on the{" "}
+            <Link href={`/admin/match/${matchNo}`} className="underline underline-offset-2">
+              match&apos;s result page
+            </Link>
+            .
+          </p>
           <Link href="/admin" className="mt-2 inline-block underline underline-offset-2">
             ← All matches
           </Link>
@@ -432,6 +462,12 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
       )}
 
       <ScorecardView card={card} teamName={teamName} />
+
+      {!submitted && (
+        <button onClick={startOver} disabled={resetting} className="text-xs text-muted underline underline-offset-2 disabled:opacity-60">
+          {resetting ? "Starting over…" : "Start this match over"}
+        </button>
+      )}
     </div>
   );
 }

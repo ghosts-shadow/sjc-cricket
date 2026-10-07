@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { connection } from "next/server";
 import { Suspense } from "react";
 import { requireOrganiser } from "@/lib/auth";
 import { getTournament } from "@/lib/data";
-import { formatDay, formatLongDay, formatTime, timeChangeText, toDubaiInputs } from "@/lib/format";
+import { formatDay, formatLongDay, formatTime, isPastDay, timeChangeText, toDubaiInputs } from "@/lib/format";
 import { FixtureForm, SwapForm } from "./fixture-form";
 
 export const metadata: Metadata = { title: "Edit fixture", robots: { index: false } };
@@ -20,9 +21,11 @@ export default function FixtureAdminPage(props: PageProps<"/admin/fixtures/[matc
 async function FixtureAdmin({ params }: { params: PageProps<"/admin/fixtures/[matchNo]">["params"] }) {
   await requireOrganiser();
   const matchNo = Number((await params).matchNo);
+  await connection();
   const { matches, teams } = await getTournament();
   const match = matches.find((m) => m.matchNo === matchNo);
   if (!match) notFound();
+  const backHref = `/admin/fixtures${isPastDay(match.startsAt) ? "?past=1" : ""}#match-${matchNo}`;
 
   const unplayed = (status: string) => status === "SCHEDULED" || status === "POSTPONED";
   const swapOptions = matches
@@ -36,7 +39,7 @@ async function FixtureAdmin({ params }: { params: PageProps<"/admin/fixtures/[ma
   return (
     <div className="mx-auto max-w-lg space-y-6">
       <div>
-        <Link href={`/admin/fixtures#match-${matchNo}`} className="text-sm underline underline-offset-2">
+        <Link href={backHref} className="text-sm underline underline-offset-2">
           ← Fixtures &amp; delays
         </Link>
         <h1 className="mt-2 font-display text-3xl font-semibold leading-tight sm:text-4xl">{match.label}</h1>

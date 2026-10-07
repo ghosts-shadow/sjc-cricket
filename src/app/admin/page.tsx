@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
-import { GroupBadge } from "@/components/cricket";
+import { GroupBadge, PastToggle } from "@/components/cricket";
 import { requireOrganiser } from "@/lib/auth";
 import { getTournament, type MatchView } from "@/lib/data";
 import { dayKey, formatLongDay, formatTime } from "@/lib/format";
@@ -10,10 +10,10 @@ import { logout } from "./actions";
 
 export const metadata: Metadata = { title: "Organisers", robots: { index: false } };
 
-export default function AdminPage() {
+export default function AdminPage(props: PageProps<"/admin">) {
   return (
     <Suspense fallback={<p className="text-sm text-muted">Loading…</p>}>
-      <Dashboard />
+      <Dashboard searchParams={props.searchParams} />
     </Suspense>
   );
 }
@@ -27,15 +27,22 @@ const STATUS_CHIP: Record<MatchView["status"], string> = {
   POSTPONED: "Postponed",
 };
 
-async function Dashboard() {
+async function Dashboard({ searchParams }: { searchParams: PageProps<"/admin">["searchParams"] }) {
   const organiser = await requireOrganiser();
+  const showPast = (await searchParams).past === "1";
   await connection();
   const { matches } = await getTournament();
   const today = dayKey(new Date().toISOString());
 
+  // Past match days (before today, UAE) are hidden unless asked for; today's stay for late results.
+  const pastCount = matches.filter((m) => dayKey(m.startsAt) < today).length;
   const days = new Map<string, MatchView[]>();
-  for (const m of matches) days.set(dayKey(m.startsAt), [...(days.get(dayKey(m.startsAt)) ?? []), m]);
-  const firstOpenDay = [...days.keys()].find((k) => k >= today);
+  for (const m of matches) {
+    const key = dayKey(m.startsAt);
+    if (!showPast && key < today) continue;
+    days.set(key, [...(days.get(key) ?? []), m]);
+  }
+  const firstOpenDay = showPast ? [...days.keys()].find((k) => k >= today) : undefined;
 
   return (
     <div className="space-y-6">
@@ -57,11 +64,15 @@ async function Dashboard() {
         </div>
       </div>
 
-      {firstOpenDay && (
-        <a href={`#day-${firstOpenDay}`} className="inline-block text-sm underline underline-offset-2">
-          Jump to next match day
-        </a>
-      )}
+      <div className="flex flex-wrap items-center gap-3">
+        <PastToggle showPast={showPast} pastCount={pastCount} href={showPast ? "/admin" : "/admin?past=1"} />
+        {firstOpenDay && (
+          <a href={`#day-${firstOpenDay}`} className="text-sm underline underline-offset-2">
+            Jump to next match day
+          </a>
+        )}
+      </div>
+      {days.size === 0 && <p className="text-sm text-muted">No more matches to come.</p>}
 
       {[...days.entries()].map(([key, list]) => (
         <section key={key} id={`day-${key}`} className="scroll-mt-4">

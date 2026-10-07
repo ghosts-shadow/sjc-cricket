@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
-import { GroupBadge } from "@/components/cricket";
+import { GroupBadge, PastToggle } from "@/components/cricket";
 import { requireOrganiser } from "@/lib/auth";
 import { getTournament, type MatchView } from "@/lib/data";
 import { dayKey, formatLongDay, formatTime, timeChangeText } from "@/lib/format";
@@ -10,18 +10,19 @@ import { DelayForm, type DelayDay } from "./delay-form";
 
 export const metadata: Metadata = { title: "Fixtures & delays", robots: { index: false } };
 
-export default function FixturesAdminPage() {
+export default function FixturesAdminPage(props: PageProps<"/admin/fixtures">) {
   return (
     <Suspense fallback={<p className="text-sm text-muted">Loading…</p>}>
-      <FixturesAdmin />
+      <FixturesAdmin searchParams={props.searchParams} />
     </Suspense>
   );
 }
 
 const matchup = (m: MatchView) => `${m.homeLabel} v ${m.awayLabel}`;
 
-async function FixturesAdmin() {
+async function FixturesAdmin({ searchParams }: { searchParams: PageProps<"/admin/fixtures">["searchParams"] }) {
   await requireOrganiser();
+  const showPast = (await searchParams).past === "1";
   await connection();
   const { matches } = await getTournament();
   const today = dayKey(new Date().toISOString());
@@ -36,8 +37,13 @@ async function FixturesAdmin() {
     delayDays.set(key, day);
   }
 
+  const pastCount = matches.filter((m) => dayKey(m.startsAt) < today).length;
   const byDay = new Map<string, MatchView[]>();
-  for (const m of matches) byDay.set(dayKey(m.startsAt), [...(byDay.get(dayKey(m.startsAt)) ?? []), m]);
+  for (const m of matches) {
+    const key = dayKey(m.startsAt);
+    if (!showPast && key < today) continue;
+    byDay.set(key, [...(byDay.get(key) ?? []), m]);
+  }
 
   return (
     <div className="space-y-8">
@@ -55,7 +61,10 @@ async function FixturesAdmin() {
       </section>
 
       <section className="space-y-6">
-        <h2 className="font-display text-xl font-semibold">All fixtures</h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-display text-xl font-semibold">{showPast ? "All fixtures" : "Today and upcoming"}</h2>
+          <PastToggle showPast={showPast} pastCount={pastCount} href={showPast ? "/admin/fixtures" : "/admin/fixtures?past=1"} />
+        </div>
         {[...byDay.entries()].map(([key, list]) => (
           <div key={key} id={`day-${key}`} className="scroll-mt-4">
             <h3 className="mb-2 font-display text-lg font-semibold">{formatLongDay(list[0].startsAt)}</h3>

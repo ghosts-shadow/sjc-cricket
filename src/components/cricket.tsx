@@ -197,6 +197,16 @@ export function StandingsTable({ group, rows, compact = false }: { group: string
   );
 }
 
+/** "Show past matches (12)" / "Hide past matches". Past = match days before today, UAE time. */
+export function PastToggle({ showPast, pastCount, href }: { showPast: boolean; pastCount: number; href: string }) {
+  if (pastCount === 0) return null;
+  return (
+    <Link href={href} scroll={false} className="inline-flex items-center rounded-full border border-line px-3 py-1 text-sm text-muted hover:text-foreground">
+      {showPast ? "Hide past matches" : `Show past matches (${pastCount})`}
+    </Link>
+  );
+}
+
 export function QualifyKey() {
   return (
     <p className="flex items-center gap-2 text-xs text-muted">

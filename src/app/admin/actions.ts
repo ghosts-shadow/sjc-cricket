@@ -1,14 +1,16 @@
 "use server";
 
 import bcrypt from "bcryptjs";
-import { updateTag } from "next/cache";
+import { refresh, updateTag } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import type { MatchStatus, Prisma } from "@prisma/client";
+import type { MatchStatus } from "@prisma/client";
+import { snapshot } from "@/lib/audit";
 import { requireOrganiser } from "@/lib/auth";
 import { TOURNAMENT_TAG } from "@/lib/data";
 import { prisma } from "@/lib/db";
-import { dayKey, fromDubaiInputs } from "@/lib/format";
+import { dayKey, fromDubaiInputs, isPastDay } from "@/lib/format";
+import { clearSession, reopenSession } from "@/lib/scoring-sessions";
 import { SESSION_COOKIE, SESSION_DAYS, signSession } from "@/lib/session-token";
 
 export interface FormState {
@@ -87,29 +89,6 @@ function parseTeamId(value: FormDataEntryValue | null): number | null {
   return /^\d+$/.test(text) ? Number(text) : null;
 }
 
-/** Snapshot of the fields an organiser can change, for the audit log. */
-function snapshot(m: {
-  status: MatchStatus;
-  score1: number | null;
-  score2: number | null;
-  winnerId: number | null;
-  team1Id: number | null;
-  team2Id: number | null;
-  startsAt: Date;
-  note: string | null;
-}): Prisma.InputJsonObject {
-  return {
-    status: m.status,
-    score1: m.score1,
-    score2: m.score2,
-    winnerId: m.winnerId,
-    team1Id: m.team1Id,
-    team2Id: m.team2Id,
-    startsAt: m.startsAt.toISOString(),
-    note: m.note,
-  };
-}
-
 export async function saveResult(_prev: FormState, formData: FormData): Promise<FormState> {
   const organiser = await requireOrganiser();
   const matchNo = Number(formData.get("matchNo"));
@@ -170,7 +149,25 @@ export async function saveResult(_prev: FormState, formData: FormData): Promise<
   ]);
 
   updateTag(TOURNAMENT_TAG);
-  redirect(`/admin#match-${matchNo}`);
+  redirect(`/admin${isPastDay(match.startsAt.toISOString()) ? "?past=1" : ""}#match-${matchNo}`);
+}
+
+/** Result page: unlock a submitted scorer, keeping its balls. */
+export async function reopenScoring(_prev: FormState, formData: FormData): Promise<FormState> {
+  const organiser = await requireOrganiser();
+  const error = await reopenSession(organiser.organiserId, Number(formData.get("matchNo")));
+  if (error) return { error };
+  refresh();
+  return { message: "Live scoring reopened. The scorer can carry on, fix it and submit again." };
+}
+
+/** Result page: delete live scoring, so the scorer starts again from the toss. */
+export async function clearScoring(_prev: FormState, formData: FormData): Promise<FormState> {
+  const organiser = await requireOrganiser();
+  const error = await clearSession(organiser.organiserId, Number(formData.get("matchNo")));
+  if (error) return { error };
+  refresh();
+  return { message: "Live scoring cleared. The scorer starts again from the toss." };
 }
 
 function readNote(formData: FormData): string | null {
@@ -261,7 +258,7 @@ export async function saveFixture(_prev: FormState, formData: FormData): Promise
   ]);
 
   updateTag(TOURNAMENT_TAG);
-  redirect(`/admin/fixtures#match-${matchNo}`);
+  redirect(`/admin/fixtures${isPastDay(startsAt.toISOString()) ? "?past=1" : ""}#match-${matchNo}`);
 }
 
 /** Swap the time slots of two unplayed matches (e.g. a team arrives late). */
