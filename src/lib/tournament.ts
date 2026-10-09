@@ -44,6 +44,7 @@ export interface StandingRow {
   noResult: number;
   runsFor: number;
   runsAgainst: number;
+  /** Organisers' "RR": runs scored minus runs conceded. */
   runDiff: number;
   /** Organisers' "NRR": run difference per match with a scored result. Null if none yet. */
   nrr: number | null;

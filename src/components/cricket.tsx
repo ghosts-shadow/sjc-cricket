@@ -160,6 +160,7 @@ export function StandingsTable({ group, rows, compact = false }: { group: string
                   <th className="hidden px-1.5 py-1.5 text-right font-semibold sm:table-cell" title="Runs against">RA</th>
                 </>
               )}
+              <th className="px-1.5 py-1.5 text-right font-semibold" title="Run difference: runs scored minus runs conceded">RR</th>
               <th className="px-1.5 py-1.5 text-right font-semibold" title="Run difference per match">NRR</th>
               <th className="px-2 py-1.5 text-right font-semibold text-foreground">Pts</th>
             </tr>
@@ -186,6 +187,7 @@ export function StandingsTable({ group, rows, compact = false }: { group: string
                     <td className="hidden px-1.5 py-1.5 text-right sm:table-cell">{row.runsAgainst}</td>
                   </>
                 )}
+                <td className="px-1.5 py-1.5 text-right text-muted">{row.played ? formatNrr(row.runDiff) : "–"}</td>
                 <td className="px-1.5 py-1.5 text-right text-muted">{formatNrr(row.nrr)}</td>
                 <td className="px-2 py-1.5 text-right font-display text-lg font-semibold leading-none">{row.points}</td>
               </tr>

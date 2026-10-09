@@ -98,6 +98,17 @@ describe("summariseOver — rules PDF examples", () => {
     expect(over.complete).toBe(true);
   });
 
+  it("run out on a no-ball: the no-ball run counts, -5 for the wicket, runs void, and it's re-bowled", () => {
+    const card = summariseOver(0, false, [{ t: "nb", runs: 2, out: true }, ...times(6, run(1))]);
+    expect(card.noBalls).toBe(1);
+    expect(card.wickets).toBe(1);
+    expect(card.legalBalls).toBe(6); // the no-ball didn't use up a ball
+    expect(card.total).toBe(1 + 6 - 5);
+    expect(parseEvents([{ type: "ball", ball: { t: "nb", runs: 3, out: true } }])).toEqual([
+      { type: "ball", ball: { t: "nb", runs: 0, out: true } },
+    ]);
+  });
+
   it("ignores balls after the over is complete", () => {
     expect(summariseOver(0, false, [...times(6, run(1)), run(6)]).total).toBe(6);
   });

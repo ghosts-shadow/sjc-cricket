@@ -21,8 +21,9 @@ export default async function StandingsPage() {
         ))}
       </div>
       <p className="text-xs text-muted">
-        Win 2 points · Draw or abandoned 1 point · Loss 0. Walkover: 2 points to the team that turned up. NRR here is the
-        organisers&apos; measure: run difference divided by matches with a scored result.
+        Win 2 points · Draw or abandoned 1 point · Loss 0. Walkover: 2 points to the team that turned up. RR and NRR are
+        the organisers&apos; measures: RR is runs scored minus runs conceded, and NRR is RR divided by matches with a scored
+        result.
       </p>
     </div>
   );

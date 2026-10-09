@@ -69,6 +69,8 @@ export async function login(_prev: FormState, formData: FormData): Promise<FormS
     path: "/",
     maxAge: SESSION_DAYS * 24 * 60 * 60,
   });
+  // Scorers only have the live scorer; organisers go wherever they were headed.
+  if (organiser.role === "scorer") redirect(/^\/score(\/|$)/.test(next) ? next : "/score");
   redirect(/^\/(admin|score)(\/|$)/.test(next) ? next : "/admin");
 }
 

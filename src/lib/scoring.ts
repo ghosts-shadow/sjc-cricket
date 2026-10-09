@@ -12,7 +12,7 @@ export type Ball =
   | { t: "run"; runs: number } // legal ball; runs include bonus runs off the nets
   | { t: "out" } // legal ball; -5 from the pair, runs on that ball are void
   | { t: "wd" } // wide
-  | { t: "nb"; runs: number } // no-ball; runs = runs off the bat on that ball
+  | { t: "nb"; runs: number; out?: boolean } // no-ball; runs = runs off the bat; out = run out on it
   | { t: "db" }; // dead ball
 
 export type PairNames = [string, string];
@@ -138,9 +138,12 @@ export function summariseOver(index: number, female: boolean, balls: Ball[], bow
         break;
       case "nb":
         // 1 run + runs off the bat + re-ball. 6th no-ball: 6 penalty runs, over ends.
+        // Run out on a no-ball (allowed, organisers 10 Oct): the no-ball run still counts and it's
+        // still re-bowled, but it's -5 and the runs on that ball are void, like any other wicket.
         card.noBalls++;
         card.extras += 1;
-        card.batRuns += ball.runs;
+        if (ball.out) card.wickets++;
+        else card.batRuns += ball.runs;
         if (card.noBalls === 6) {
           card.penalties += 6;
           card.complete = true;
@@ -188,7 +191,9 @@ export function parseEvents(input: unknown): ScoreEvent[] | null {
       const b = e.ball as Record<string, unknown> | null;
       if (!b || typeof b !== "object") return null;
       if (b.t === "run" && runs(b.runs)) events.push({ type: "ball", ball: { t: "run", runs: b.runs as number } });
-      else if (b.t === "nb" && runs(b.runs)) events.push({ type: "ball", ball: { t: "nb", runs: b.runs as number } });
+      else if (b.t === "nb" && runs(b.runs)) {
+        events.push({ type: "ball", ball: b.out === true ? { t: "nb", runs: 0, out: true } : { t: "nb", runs: b.runs as number } });
+      }
       else if (b.t === "out" || b.t === "wd" || b.t === "db") events.push({ type: "ball", ball: { t: b.t } });
       else return null;
     } else if (e.type === "female" && typeof e.on === "boolean") {

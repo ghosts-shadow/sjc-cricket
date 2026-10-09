@@ -67,6 +67,7 @@ export function chip(ball: Ball): string {
     case "db":
       return "Db";
     case "nb":
+      if (ball.out) return "Nb W";
       return ball.runs ? `Nb+${ball.runs}` : "Nb";
   }
 }
@@ -283,13 +284,13 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
         <div className="rounded-lg border border-win/50 bg-win-tint p-4 text-sm">
           <p className="font-semibold">Result submitted. The public site is updated.</p>
           <p className="mt-1 text-muted">
-            Something wrong? Reopen live scoring on the{" "}
+            Something wrong? An organiser can reopen live scoring on the{" "}
             <Link href={`/admin/match/${matchNo}`} className="underline underline-offset-2">
               match&apos;s result page
             </Link>
             .
           </p>
-          <Link href="/admin" className="mt-2 inline-block underline underline-offset-2">
+          <Link href="/score" className="mt-2 inline-block underline underline-offset-2">
             ← All matches
           </Link>
         </div>
@@ -359,13 +360,16 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
               <OverLine over={openOver} />
               {nbPending ? (
                 <div>
-                  <p className="mb-2 text-sm font-medium">No-ball: runs off the bat?</p>
+                  <p className="mb-2 text-sm font-medium">No-ball: runs off the bat, or run out?</p>
                   <div className="grid grid-cols-5 gap-2">
                     {[0, 1, 2, 3, 4, 5, 6].map((r) => (
                       <BigButton key={r} onClick={() => ball({ t: "nb", runs: r })}>
                         {r}
                       </BigButton>
                     ))}
+                    <BigButton tone="danger" onClick={() => ball({ t: "nb", runs: 0, out: true })}>
+                      <span className="text-base">Run out</span>
+                    </BigButton>
                     <BigButton tone="muted" onClick={() => setNbPending(false)}>
                       Cancel
                     </BigButton>
@@ -476,7 +480,7 @@ function Header({ label, team1, team2, sync }: { label: string; team1: string; t
   return (
     <div>
       <div className="flex items-center justify-between gap-2 text-xs text-muted">
-        <Link href="/admin" className="underline underline-offset-2">
+        <Link href="/score" className="underline underline-offset-2">
           ← All matches
         </Link>
         {sync && <span>{sync}</span>}
@@ -519,7 +523,7 @@ function OverLine({ over }: { over: OverCard | null }) {
           <span
             key={i}
             className={`tabular rounded px-2 py-1 text-sm font-medium ${
-              b.t === "out" ? "bg-danger text-card" : b.t === "run" ? "bg-soft" : "bg-warn-tint text-warn"
+              b.t === "out" || (b.t === "nb" && b.out) ? "bg-danger text-card" : b.t === "run" ? "bg-soft" : "bg-warn-tint text-warn"
             }`}
           >
             {chip(b)}

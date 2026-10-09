@@ -103,6 +103,8 @@ model Organiser {
   name      String   @unique
   pinHash   String
   active    Boolean  @default(true)
+  // "organiser": everything. "scorer": live scoring only (no results, fixtures or contacts).
+  role      String   @default("organiser")
   createdAt DateTime @default(now())
   // Brute-force protection: 5 wrong PINs lock the login for 15 minutes.
   failedLogins Int       @default(0)

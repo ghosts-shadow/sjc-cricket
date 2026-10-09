@@ -42,8 +42,8 @@ const teamKey = (name: string) => name.toUpperCase().replace(/[^A-Z0-9]/g, "");
 const ALIASES: Record<string, string | string[]> = {
   JESUSYOUTHTEAMB: "JESUS YOUTH B",
   GUMCCCRICKETCLUB: "G. U. M. CC",
-  // Not mapped: "BUNS UNITED" is a separate team, not Golibaje United (Lost, 8 Oct). It isn't in the
-  // organisers' Team list or the group draw, so its row is skipped.
+  // Confirmed by the organisers (10 Oct): "Golibaje United is Buns United".
+  BUNSUNITED: "GOLIBAJE UNITED",
   // Not mapped: the two "Malinda Nilaksha" rows are the Sri Lankan Community A and B squads, but the
   // sheet doesn't say which is which, so organisers add those members themselves (Lost, 8 Oct).
 };

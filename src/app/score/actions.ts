@@ -2,7 +2,7 @@
 
 import { updateTag } from "next/cache";
 import type { Prisma } from "@prisma/client";
-import { requireOrganiser } from "@/lib/auth";
+import { requireScorer } from "@/lib/auth";
 import { getTournament, TOURNAMENT_TAG } from "@/lib/data";
 import { prisma } from "@/lib/db";
 import { saveRosterNames } from "@/lib/roster";
@@ -16,7 +16,7 @@ export interface ScoringResult {
 
 /** Background save of the scorer's ball-by-ball state, so a dead phone doesn't lose the match. */
 export async function syncScoring(matchNo: number, setupInput: unknown, eventsInput: unknown): Promise<ScoringResult> {
-  const organiser = await requireOrganiser();
+  const organiser = await requireScorer();
   const setup = parseSetup(setupInput);
   const events = parseEvents(eventsInput);
   if (!setup || !events) return { ok: false, error: "Invalid scoring data." };
@@ -41,7 +41,7 @@ export async function syncScoring(matchNo: number, setupInput: unknown, eventsIn
 
 /** Scorer's "Start this match over": delete the unsubmitted session so it restarts from the toss. */
 export async function resetScoring(matchNo: number): Promise<ScoringResult> {
-  const organiser = await requireOrganiser();
+  const organiser = await requireScorer();
   const session = await prisma.scoringSession.findFirst({ where: { match: { matchNo } } });
   if (session?.submitted) return { ok: false, error: "This match was already submitted. Reopen it from the result page first." };
   const error = await clearSession(organiser.organiserId, matchNo);
@@ -65,7 +65,7 @@ export async function submitScoring(
   eventsInput: unknown,
   superOverWinner: 1 | 2 | null,
 ): Promise<ScoringResult> {
-  const organiser = await requireOrganiser();
+  const organiser = await requireScorer();
   const setup = parseSetup(setupInput);
   const events = parseEvents(eventsInput);
   if (!setup || !events) return { ok: false, error: "Invalid scoring data." };

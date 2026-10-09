@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { requireOrganiser } from "@/lib/auth";
+import { requireScorer } from "@/lib/auth";
 import { getTournament } from "@/lib/data";
 import { prisma } from "@/lib/db";
 import { getRosters } from "@/lib/roster";
@@ -20,7 +20,7 @@ export default function ScorePage(props: PageProps<"/score/[matchNo]">) {
 }
 
 async function ScoreLoader({ params }: { params: PageProps<"/score/[matchNo]">["params"] }) {
-  await requireOrganiser();
+  await requireScorer();
   const matchNo = Number((await params).matchNo);
   const { matches } = await getTournament();
   const match = matches.find((m) => m.matchNo === matchNo);
@@ -31,7 +31,7 @@ async function ScoreLoader({ params }: { params: PageProps<"/score/[matchNo]">["
       <div className="space-y-2">
         <h1 className="font-display text-2xl font-semibold">{match.label}</h1>
         <p className="text-sm text-muted">The teams for this match aren&apos;t decided yet.</p>
-        <Link href="/admin" className="text-sm underline underline-offset-2">
+        <Link href="/score" className="text-sm underline underline-offset-2">
           ← All matches
         </Link>
       </div>
