@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { requireScorer } from "@/lib/auth";
-import { getTournament } from "@/lib/data";
+import { getTournamentLive } from "@/lib/data";
 import { prisma } from "@/lib/db";
 import { getRosters } from "@/lib/roster";
 import { parseEvents, parseSetup } from "@/lib/scoring";
@@ -22,7 +22,7 @@ export default function ScorePage(props: PageProps<"/score/[matchNo]">) {
 async function ScoreLoader({ params }: { params: PageProps<"/score/[matchNo]">["params"] }) {
   await requireScorer();
   const matchNo = Number((await params).matchNo);
-  const { matches } = await getTournament();
+  const { matches } = await getTournamentLive();
   const match = matches.find((m) => m.matchNo === matchNo);
   if (!match) notFound();
 

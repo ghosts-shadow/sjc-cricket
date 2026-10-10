@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { requireOrganiser } from "@/lib/auth";
-import { getTournament } from "@/lib/data";
+import { getTournamentLive } from "@/lib/data";
 import { formatDay, formatLongDay, formatTime, isPastDay, timeChangeText, toDubaiInputs } from "@/lib/format";
 import { FixtureForm, SwapForm } from "./fixture-form";
 
@@ -22,7 +22,7 @@ async function FixtureAdmin({ params }: { params: PageProps<"/admin/fixtures/[ma
   await requireOrganiser();
   const matchNo = Number((await params).matchNo);
   await connection();
-  const { matches, teams } = await getTournament();
+  const { matches, teams } = await getTournamentLive();
   const match = matches.find((m) => m.matchNo === matchNo);
   if (!match) notFound();
   const backHref = `/admin/fixtures${isPastDay(match.startsAt) ? "?past=1" : ""}#match-${matchNo}`;

@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { requireOrganiser } from "@/lib/auth";
-import { getTournament } from "@/lib/data";
+import { getTournamentLive } from "@/lib/data";
 import { prisma } from "@/lib/db";
 import { formatDay, formatLongDay, formatStamp, formatTime, isPastDay } from "@/lib/format";
 import { parseEvents } from "@/lib/scoring";
@@ -25,7 +25,7 @@ async function MatchAdmin({ params }: { params: PageProps<"/admin/match/[matchNo
   await requireOrganiser();
   const matchNo = Number((await params).matchNo);
   await connection();
-  const { matches, teams } = await getTournament();
+  const { matches, teams } = await getTournamentLive();
   const match = matches.find((m) => m.matchNo === matchNo);
   if (!match) notFound();
   // Past days are hidden on the list by default, so come back to it with them shown.

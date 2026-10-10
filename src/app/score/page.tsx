@@ -2,9 +2,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
+import { AutoRefresh } from "@/components/auto-refresh";
 import { GroupBadge } from "@/components/cricket";
 import { requireScorer } from "@/lib/auth";
-import { getTournament, type MatchView } from "@/lib/data";
+import { getTournamentLive, type MatchView } from "@/lib/data";
 import { dayKey, formatLongDay, formatTime } from "@/lib/format";
 import { logout } from "../admin/actions";
 
@@ -22,7 +23,7 @@ export default function ScoreIndexPage() {
 async function ScoreIndex() {
   const me = await requireScorer();
   await connection();
-  const { matches } = await getTournament();
+  const { matches } = await getTournamentLive();
   const today = dayKey(new Date().toISOString());
 
   const days = new Map<string, MatchView[]>();
@@ -38,6 +39,7 @@ async function ScoreIndex() {
         <div>
           <h1 className="font-display text-3xl font-semibold leading-tight sm:text-4xl">Live scoring</h1>
           <p className="mt-1 text-sm text-muted">Signed in as {me.name}. Pick the match you&apos;re scoring.</p>
+          <AutoRefresh seconds={30} />
         </div>
         <div className="flex flex-wrap gap-2">
           {me.role !== "scorer" && (

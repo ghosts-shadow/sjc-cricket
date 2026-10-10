@@ -4,7 +4,7 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { GroupBadge, PastToggle } from "@/components/cricket";
 import { requireOrganiser } from "@/lib/auth";
-import { getTournament, type MatchView } from "@/lib/data";
+import { getTournamentLive, type MatchView } from "@/lib/data";
 import { dayKey, formatLongDay, formatTime, timeChangeText } from "@/lib/format";
 import { DelayForm, type DelayDay } from "./delay-form";
 
@@ -24,7 +24,7 @@ async function FixturesAdmin({ searchParams }: { searchParams: PageProps<"/admin
   await requireOrganiser();
   const showPast = (await searchParams).past === "1";
   await connection();
-  const { matches } = await getTournament();
+  const { matches } = await getTournamentLive();
   const today = dayKey(new Date().toISOString());
 
   // Days from today on that still have unplayed matches, for the delay form.

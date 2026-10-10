@@ -98,15 +98,30 @@ describe("summariseOver — rules PDF examples", () => {
     expect(over.complete).toBe(true);
   });
 
-  it("run out on a no-ball: the no-ball run counts, -5 for the wicket, runs void, and it's re-bowled", () => {
+  it("run out on a no-ball: 1 no-ball run + runs completed, -5 for the wicket, and it's re-bowled", () => {
     const card = summariseOver(0, false, [{ t: "nb", runs: 2, out: true }, ...times(6, run(1))]);
     expect(card.noBalls).toBe(1);
     expect(card.wickets).toBe(1);
     expect(card.legalBalls).toBe(6); // the no-ball didn't use up a ball
-    expect(card.total).toBe(1 + 6 - 5);
+    expect(card.total).toBe(1 + 2 + 6 - 5);
     expect(parseEvents([{ type: "ball", ball: { t: "nb", runs: 3, out: true } }])).toEqual([
-      { type: "ball", ball: { t: "nb", runs: 0, out: true } },
+      { type: "ball", ball: { t: "nb", runs: 3, out: true } },
     ]);
+  });
+
+  it("run out on a legal ball: runs completed count, -5 for the wicket, and it uses up the ball", () => {
+    const card = summariseOver(0, false, [{ t: "out", runs: 2 }, ...times(5, run(1))]);
+    expect(card.wickets).toBe(1);
+    expect(card.legalBalls).toBe(6);
+    expect(card.complete).toBe(true);
+    expect(card.total).toBe(2 + 5 - 5);
+    // A plain wicket still has no runs, and old events without runs replay the same.
+    expect(summariseOver(0, false, [out, ...times(5, run(1))]).total).toBe(5 - 5);
+    expect(parseEvents([{ type: "ball", ball: { t: "out", runs: 3 } }, { type: "ball", ball: { t: "out", runs: 0 } }])).toEqual([
+      { type: "ball", ball: { t: "out", runs: 3 } },
+      { type: "ball", ball: { t: "out" } },
+    ]);
+    expect(parseEvents([{ type: "ball", ball: { t: "out", runs: -1 } }])).toBeNull();
   });
 
   it("ignores balls after the over is complete", () => {

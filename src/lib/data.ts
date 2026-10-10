@@ -38,11 +38,23 @@ export interface Tournament {
   lastUpdated: string | null;
 }
 
+/**
+ * Cached, for the public pages. On Vercel the 'use cache' store is in memory per server instance,
+ * so after a save another instance can serve the old copy until it revalidates (about a minute).
+ */
 export async function getTournament(): Promise<Tournament> {
   "use cache";
   cacheLife("minutes");
   cacheTag(TOURNAMENT_TAG);
+  return loadTournament();
+}
 
+/** Uncached, for organiser and scorer screens and server actions: always the latest saved result. */
+export async function getTournamentLive(): Promise<Tournament> {
+  return loadTournament();
+}
+
+async function loadTournament(): Promise<Tournament> {
   const [teamRows, matchRows] = await Promise.all([
     // Public fields only: captain contacts must never reach this cached, public data.
     prisma.team.findMany({

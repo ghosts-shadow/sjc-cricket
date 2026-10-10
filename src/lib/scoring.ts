@@ -10,9 +10,10 @@
 
 export type Ball =
   | { t: "run"; runs: number } // legal ball; runs include bonus runs off the nets
-  | { t: "out" } // legal ball; -5 from the pair, runs on that ball are void
+  // legal ball; -5 from the pair. Caught/bowled etc.: no runs. Run out: runs = runs completed, which count.
+  | { t: "out"; runs?: number }
   | { t: "wd" } // wide
-  | { t: "nb"; runs: number; out?: boolean } // no-ball; runs = runs off the bat; out = run out on it
+  | { t: "nb"; runs: number; out?: boolean } // no-ball; runs = runs off the bat (or completed, if run out)
   | { t: "db" }; // dead ball
 
 export type PairNames = [string, string];
@@ -112,8 +113,10 @@ export function summariseOver(index: number, female: boolean, balls: Ball[], bow
         card.batRuns += ball.runs;
         break;
       case "out":
+        // -5 for the wicket. A run out keeps the runs completed before it (organisers, 10 Oct).
         card.legalBalls++;
         card.wickets++;
+        card.batRuns += ball.runs ?? 0;
         break;
       case "wd":
         card.wides++;
@@ -138,12 +141,12 @@ export function summariseOver(index: number, female: boolean, balls: Ball[], bow
         break;
       case "nb":
         // 1 run + runs off the bat + re-ball. 6th no-ball: 6 penalty runs, over ends.
-        // Run out on a no-ball (allowed, organisers 10 Oct): the no-ball run still counts and it's
-        // still re-bowled, but it's -5 and the runs on that ball are void, like any other wicket.
+        // Run out on a no-ball (allowed, organisers 10 Oct): still 1 run + the runs completed, still
+        // re-bowled, and -5 for the wicket.
         card.noBalls++;
         card.extras += 1;
+        card.batRuns += ball.runs;
         if (ball.out) card.wickets++;
-        else card.batRuns += ball.runs;
         if (card.noBalls === 6) {
           card.penalties += 6;
           card.complete = true;
@@ -192,9 +195,14 @@ export function parseEvents(input: unknown): ScoreEvent[] | null {
       if (!b || typeof b !== "object") return null;
       if (b.t === "run" && runs(b.runs)) events.push({ type: "ball", ball: { t: "run", runs: b.runs as number } });
       else if (b.t === "nb" && runs(b.runs)) {
-        events.push({ type: "ball", ball: b.out === true ? { t: "nb", runs: 0, out: true } : { t: "nb", runs: b.runs as number } });
-      }
-      else if (b.t === "out" || b.t === "wd" || b.t === "db") events.push({ type: "ball", ball: { t: b.t } });
+        const n = b.runs as number;
+        events.push({ type: "ball", ball: b.out === true ? { t: "nb", runs: n, out: true } : { t: "nb", runs: n } });
+      } else if (b.t === "out") {
+        // runs only on a run out; a plain wicket has none
+        if (b.runs === undefined || b.runs === 0) events.push({ type: "ball", ball: { t: "out" } });
+        else if (runs(b.runs)) events.push({ type: "ball", ball: { t: "out", runs: b.runs as number } });
+        else return null;
+      } else if (b.t === "wd" || b.t === "db") events.push({ type: "ball", ball: { t: b.t } });
       else return null;
     } else if (e.type === "female" && typeof e.on === "boolean") {
       events.push({ type: "female", on: e.on });

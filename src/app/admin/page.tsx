@@ -2,9 +2,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
+import { AutoRefresh } from "@/components/auto-refresh";
 import { GroupBadge, PastToggle } from "@/components/cricket";
 import { requireOrganiser } from "@/lib/auth";
-import { getTournament, type MatchView } from "@/lib/data";
+import { getTournamentLive, type MatchView } from "@/lib/data";
 import { prisma } from "@/lib/db";
 import { dayKey, formatLongDay, formatTime } from "@/lib/format";
 import { logout } from "./actions";
@@ -39,7 +40,7 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/admin">["
   const organiser = await requireOrganiser();
   const showPast = (await searchParams).past === "1";
   await connection();
-  const { matches } = await getTournament();
+  const { matches } = await getTournamentLive();
   const today = dayKey(new Date().toISOString());
 
   // Past match days (before today, UAE) are hidden unless asked for; today's stay for late results.
@@ -63,7 +64,10 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/admin">["
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="font-display text-3xl font-semibold leading-tight sm:text-4xl">Results</h1>
-          <p className="mt-1 text-sm text-muted">Signed in as {organiser.name}. Every change is logged with your name.</p>
+          <p className="mt-1 text-sm text-muted">
+            Signed in as {organiser.name}. Every change is logged with your name. This list updates itself every 20 seconds.
+          </p>
+          <AutoRefresh seconds={20} />
         </div>
         <div className="flex flex-wrap gap-2">
           <Link href="/admin/fixtures" className="rounded-md border border-line px-3 py-1.5 text-sm hover:border-muted">

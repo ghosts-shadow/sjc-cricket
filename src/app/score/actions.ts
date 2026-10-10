@@ -3,7 +3,7 @@
 import { updateTag } from "next/cache";
 import type { Prisma } from "@prisma/client";
 import { requireScorer } from "@/lib/auth";
-import { getTournament, TOURNAMENT_TAG } from "@/lib/data";
+import { getTournamentLive, TOURNAMENT_TAG } from "@/lib/data";
 import { prisma } from "@/lib/db";
 import { saveRosterNames } from "@/lib/roster";
 import { clearSession } from "@/lib/scoring-sessions";
@@ -51,7 +51,7 @@ export async function resetScoring(matchNo: number): Promise<ScoringResult> {
 /** Grow both teams' rosters from the names in this session. Never fails the save it rides on. */
 async function rememberPlayers(matchNo: number, setup: ScoringSetup, events: ScoreEvent[]) {
   try {
-    const view = (await getTournament()).matches.find((m) => m.matchNo === matchNo);
+    const view = (await getTournamentLive()).matches.find((m) => m.matchNo === matchNo);
     if (view?.home && view.away) await saveRosterNames({ 1: view.home.id, 2: view.away.id }, setup, events);
   } catch (err) {
     console.error("rememberPlayers failed", err);
@@ -73,7 +73,7 @@ export async function submitScoring(
   const card = replay(setup, events);
   if (!card.finished || !card.result) return { ok: false, error: "Both innings must be finished before submitting." };
 
-  const { matches } = await getTournament();
+  const { matches } = await getTournamentLive();
   const view = matches.find((m) => m.matchNo === matchNo);
   const match = await prisma.match.findUnique({ where: { matchNo }, include: { scoring: true } });
   if (!view || !match) return { ok: false, error: "Match not found." };

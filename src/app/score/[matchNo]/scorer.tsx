@@ -61,13 +61,13 @@ export function chip(ball: Ball): string {
     case "run":
       return String(ball.runs);
     case "out":
-      return "W";
+      return ball.runs ? `W+${ball.runs}` : "W";
     case "wd":
       return "Wd";
     case "db":
       return "Db";
     case "nb":
-      if (ball.out) return "Nb W";
+      if (ball.out) return ball.runs ? `Nb W+${ball.runs}` : "Nb W";
       return ball.runs ? `Nb+${ball.runs}` : "Nb";
   }
 }
@@ -108,6 +108,12 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
   const [synced, setSynced] = useState<{ rev: number; status: SyncStatus }>({ rev: 0, status: "saved" });
   const [retry, setRetry] = useState(0);
   const [nbPending, setNbPending] = useState(false);
+  // Run out picker open: on a legal ball, or on a no-ball. Both ask for the runs completed.
+  const [runOut, setRunOut] = useState<null | "legal" | "nb">(null);
+  const closePickers = () => {
+    setNbPending(false);
+    setRunOut(null);
+  };
   const [submitted, setSubmitted] = useState(initial.submitted);
   const [superOver, setSuperOver] = useState<1 | 2 | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -158,7 +164,7 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
   const setSetup = (s: ScoringSetup) => change((d) => ({ setup: s, events: d.events }));
   const pushMany = (more: ScoreEvent[]) => {
     if (more.length) change((d) => ({ setup: d.setup, events: [...d.events, ...more] }));
-    setNbPending(false);
+    closePickers();
     setEditingPlayers(false);
     setError(null);
   };
@@ -169,7 +175,7 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
     if (!window.confirm(`Start this match over?${lost} You'll pick who bats first again.`)) return;
     const previous = doc;
     setDoc({ setup: null, events: [], rev: 0 }); // also cancels any pending background save
-    setNbPending(false);
+    closePickers();
     setEditingPlayers(false);
     setError(null);
     startReset(async () => {
@@ -194,14 +200,14 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
       : "";
     if (!window.confirm(`Change the toss so ${teamName(next)} bats first?${detail}`)) return;
     change((d) => (d.setup ? swapBattingFirst(d.setup, d.events) : d));
-    setNbPending(false);
+    closePickers();
     setEditingPlayers(false);
     setError(null);
   };
   const ball = (b: Ball) => push({ type: "ball", ball: b });
   const undo = () => {
     change((d) => ({ setup: d.setup, events: d.events.slice(0, -1) }));
-    setNbPending(false);
+    closePickers();
   };
 
   if (!setup || !card) {
@@ -358,7 +364,26 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
                 </button>
               </p>
               <OverLine over={openOver} />
-              {nbPending ? (
+              {runOut ? (
+                <div>
+                  <p className="mb-2 text-sm font-medium">
+                    {runOut === "nb" ? "No-ball and run out: runs completed?" : "Run out: runs completed?"}
+                  </p>
+                  <div className="grid grid-cols-4 gap-2">
+                    {[0, 1, 2, 3, 4, 5, 6].map((r) => (
+                      <BigButton key={r} onClick={() => ball(runOut === "nb" ? { t: "nb", runs: r, out: true } : { t: "out", runs: r })}>
+                        {r}
+                      </BigButton>
+                    ))}
+                    <BigButton tone="muted" onClick={closePickers}>
+                      Cancel
+                    </BigButton>
+                  </div>
+                  <p className="mt-2 text-xs text-muted">
+                    −5 for the wicket. The runs completed still count{runOut === "nb" ? ", plus 1 for the no-ball (re-bowled)" : ""}.
+                  </p>
+                </div>
+              ) : nbPending ? (
                 <div>
                   <p className="mb-2 text-sm font-medium">No-ball: runs off the bat, or run out?</p>
                   <div className="grid grid-cols-5 gap-2">
@@ -367,10 +392,10 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
                         {r}
                       </BigButton>
                     ))}
-                    <BigButton tone="danger" onClick={() => ball({ t: "nb", runs: 0, out: true })}>
+                    <BigButton tone="danger" onClick={() => setRunOut("nb")}>
                       <span className="text-base">Run out</span>
                     </BigButton>
-                    <BigButton tone="muted" onClick={() => setNbPending(false)}>
+                    <BigButton tone="muted" onClick={closePickers}>
                       Cancel
                     </BigButton>
                   </div>
@@ -384,9 +409,12 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
                       </BigButton>
                     ))}
                   </div>
-                  <div className="grid grid-cols-4 gap-2">
+                  <div className="grid grid-cols-5 gap-2">
                     <BigButton tone="danger" onClick={() => ball({ t: "out" })}>
                       OUT
+                    </BigButton>
+                    <BigButton tone="danger" onClick={() => setRunOut("legal")}>
+                      <span className="block text-base leading-tight">Run out</span>
                     </BigButton>
                     <BigButton tone="extra" onClick={() => ball({ t: "wd" })}>
                       WD
