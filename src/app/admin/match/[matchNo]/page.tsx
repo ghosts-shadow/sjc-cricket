@@ -7,7 +7,8 @@ import { requireOrganiser } from "@/lib/auth";
 import { getTournamentLive } from "@/lib/data";
 import { prisma } from "@/lib/db";
 import { formatDay, formatLongDay, formatStamp, formatTime, isPastDay } from "@/lib/format";
-import { parseEvents } from "@/lib/scoring";
+import { BattingCard } from "@/components/batting";
+import { parseEvents, parseSetup, replay } from "@/lib/scoring";
 import { ResultForm } from "./result-form";
 import { ScoringControls } from "./scoring-controls";
 
@@ -40,7 +41,10 @@ async function MatchAdmin({ params }: { params: PageProps<"/admin/match/[matchNo
     }),
     prisma.scoringSession.findUnique({ where: { matchId: match.id }, include: { updatedBy: { select: { name: true } } } }),
   ]);
-  const sessionBalls = session ? (parseEvents(session.events) ?? []).filter((e) => e.type === "ball").length : 0;
+  const sessionEvents = session ? (parseEvents(session.events) ?? []) : [];
+  const sessionBalls = sessionEvents.filter((e) => e.type === "ball").length;
+  const sessionSetup = session ? parseSetup(session.setup) : null;
+  const sessionCard = sessionSetup && sessionBalls > 0 ? replay(sessionSetup, sessionEvents) : null;
   const teamName = new Map(teams.map((t) => [t.id, t.name]));
   type Snap = {
     status: string;
@@ -120,6 +124,8 @@ async function MatchAdmin({ params }: { params: PageProps<"/admin/match/[matchNo
           }
         />
       )}
+
+      {sessionCard && <BattingCard card={sessionCard} teamName={(side) => (side === 1 ? match.homeLabel : match.awayLabel)} />}
 
       {history.length > 0 && (
         <section>

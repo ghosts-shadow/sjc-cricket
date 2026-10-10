@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { namesBySide, parseEvents, parseSetup, replay, summariseOver, swapBattingFirst, type Ball, type ScoreEvent } from "./scoring";
+import {
+  defaultStriker,
+  namesBySide,
+  parseEvents,
+  parseSetup,
+  replay,
+  summariseOver,
+  swapBattingFirst,
+  type Ball,
+  type ScoreEvent,
+} from "./scoring";
 
 describe("parseEvents / parseSetup", () => {
   it("accepts well-formed events and strips unknown fields", () => {
@@ -274,5 +284,177 @@ describe("batters and bowlers", () => {
     expect(parseEvents([{ type: "bowler", name: "x".repeat(41) }])).toBeNull();
     expect(parseEvents([{ type: "batters", names: ["Only one"] }])).toBeNull();
     expect(parseEvents([{ type: "batters", names: ["A", 7] }])).toBeNull();
+  });
+});
+
+describe("per-batter scores", () => {
+  const balls = (list: Ball[]): ScoreEvent[] => list.map((ball) => ({ type: "ball", ball }));
+  // A ball off the bat for batter 0 (a) or 1 (b): running runs, plus an optional bonus ("boundary").
+  const a = (running: number, bonus = 0): Ball => ({ t: "run", runs: bonus + running, striker: 0, ...(bonus ? { bonus } : {}) });
+  const b = (running: number, bonus = 0): Ball => ({ t: "run", runs: bonus + running, striker: 1, ...(bonus ? { bonus } : {}) });
+  const start: ScoreEvent[] = [
+    { type: "batters", names: ["Anil", "Ben"] },
+    { type: "bowler", name: "Xavier" },
+  ];
+
+  it("credits runs, balls faced and boundary runs to the striker; wides and dead balls to nobody", () => {
+    const card = replay({ battingFirst: 1 }, [
+      ...start,
+      ...balls([a(0, 4), wd, a(1, 2), b(0, 6), db, b(2), b(4), { t: "nb", runs: 3, bonus: 2, striker: 1 }, a(0)]),
+    ]);
+    const [anil, ben] = card.innings[0].batters;
+    expect(anil).toMatchObject({ name: "Anil", pair: 0, runs: 7, balls: 3, bonusRuns: 6, fours: 1, sixes: 0, outs: 0, net: 7 });
+    // Ben's 4 is all running, not a back-net four. The no-ball (2+1) counts as a ball faced.
+    expect(ben).toMatchObject({ name: "Ben", runs: 15, balls: 4, bonusRuns: 8, fours: 0, sixes: 1, outs: 0, net: 15 });
+    expect(card.innings[0].unattributed).toBe(0);
+  });
+
+  it("a catch is -5 with no runs; a run out credits the runs to the striker and the out to whoever was run out", () => {
+    const card = replay({ battingFirst: 1 }, [
+      ...start,
+      ...balls([
+        { t: "out", striker: 0 }, // Anil caught
+        { t: "out", runs: 2, striker: 0, runOut: true, nonStriker: true }, // Anil ran 2, Ben run out at the other end
+        { t: "nb", runs: 1, out: true, striker: 1 }, // Ben run out off a no-ball after 1
+        { t: "out", striker: 1, runOut: true }, // Ben run out going for the first run
+      ]),
+    ]);
+    const [anil, ben] = card.innings[0].batters;
+    expect(anil).toMatchObject({ runs: 2, balls: 2, outs: 1, net: -3 });
+    expect(ben).toMatchObject({ runs: 1, balls: 2, outs: 3, net: -14 });
+    expect(card.innings[0].dismissals).toEqual([
+      { over: 0, pair: 0, batter: "Anil", runOut: false, runs: 0, noBall: false },
+      { over: 0, pair: 0, batter: "Ben", runOut: true, runs: 2, noBall: false },
+      { over: 0, pair: 0, batter: "Ben", runOut: true, runs: 1, noBall: true },
+      { over: 0, pair: 0, batter: "Ben", runOut: true, runs: 0, noBall: false },
+    ]);
+  });
+
+  it("lists wickets from before per-batter scoring too, without a name", () => {
+    const card = replay({ battingFirst: 1 }, [...start, ...balls([out, { t: "out", runs: 1 }])]);
+    expect(card.innings[0].dismissals).toEqual([
+      { over: 0, pair: 0, batter: null, runOut: false, runs: 0, noBall: false },
+      // No runOut flag back then, but runs completed only happen on a run out.
+      { over: 0, pair: 0, batter: null, runOut: true, runs: 1, noBall: false },
+    ]);
+  });
+
+  it("batters' net runs plus extras and penalties add up to the innings total", () => {
+    const card = replay({ battingFirst: 1 }, [
+      ...start,
+      ...balls([a(3), wd, wd, wd, wd, b(1), { t: "out", striker: 1 }, a(2), b(0, 6), a(1)]),
+      { type: "bowler", name: "Yusuf" },
+      { type: "female", on: true },
+      ...balls([b(2), wd, { t: "nb", runs: 1, striker: 1 }, b(0), db]),
+    ]);
+    const inn = card.innings[0];
+    const nets = inn.batters.reduce((sum, x) => sum + x.net, 0);
+    const extras = inn.overs.reduce((sum, o) => sum + o.extras + o.penalties, 0);
+    expect(inn.runs).toBe(20);
+    expect(nets + extras).toBe(inn.runs);
+  });
+
+  it("old balls without a striker replay the same and are counted as unattributed", () => {
+    const old = replay({ battingFirst: 1 }, [...start, ...balls([run(4), wd, out, nb(2), db])]);
+    expect(old.innings[0].runs).toBe(4 + 1 - 5 + 1 + 2);
+    expect(old.innings[0].unattributed).toBe(3);
+    expect(old.innings[0].batters.every((x) => x.balls === 0 && x.runs === 0)).toBe(true);
+    // No pair names at all: no batter lines.
+    expect(replay({ battingFirst: 1 }, balls([a(1)])).innings[0]).toMatchObject({ batters: [], unattributed: 1 });
+  });
+
+  it("parseEvents keeps striker, bonus and run-out detail, and drops nonsense without failing", () => {
+    expect(
+      parseEvents([
+        { type: "ball", ball: { t: "run", runs: 3, striker: 1, bonus: 2 } },
+        { type: "ball", ball: { t: "run", runs: 6, striker: 0, bonus: 6 } },
+        { type: "ball", ball: { t: "run", runs: 3, bonus: 5 } }, // 5 is no bonus value
+        { type: "ball", ball: { t: "run", runs: 1, bonus: 2 } }, // bonus can't exceed the runs
+        { type: "ball", ball: { t: "run", runs: 1, striker: 2, boundary: true } },
+        { type: "ball", ball: { t: "out", runs: 2, striker: 0, nonStriker: true } },
+        { type: "ball", ball: { t: "out", runs: 0, striker: 1, runOut: true } },
+        { type: "ball", ball: { t: "out", striker: 1, runOut: "yes" } },
+        { type: "ball", ball: { t: "nb", runs: 4, striker: 1, bonus: 4 } },
+        { type: "ball", ball: { t: "nb", runs: 1, out: true, striker: 1, bonus: 1, nonStriker: true } },
+      ]),
+    ).toEqual([
+      { type: "ball", ball: { t: "run", runs: 3, striker: 1, bonus: 2 } },
+      { type: "ball", ball: { t: "run", runs: 6, striker: 0, bonus: 6 } },
+      { type: "ball", ball: { t: "run", runs: 3 } },
+      { type: "ball", ball: { t: "run", runs: 1 } },
+      { type: "ball", ball: { t: "run", runs: 1 } },
+      { type: "ball", ball: { t: "out", runs: 2, striker: 0, nonStriker: true } },
+      { type: "ball", ball: { t: "out", striker: 1, runOut: true } },
+      { type: "ball", ball: { t: "out", striker: 1 } },
+      { type: "ball", ball: { t: "nb", runs: 4, striker: 1, bonus: 4 } },
+      { type: "ball", ball: { t: "nb", runs: 1, out: true, striker: 1, nonStriker: true } },
+    ]);
+  });
+
+  it("swapBattingFirst drops who was on strike along with the names, but keeps the bonus split", () => {
+    const swapped = swapBattingFirst({ battingFirst: 1 }, [...start, ...balls([a(1, 2), { t: "out", striker: 1, runOut: true, nonStriker: true }])]);
+    expect(swapped.events).toEqual(balls([{ t: "run", runs: 3, bonus: 2 }, { t: "out", runOut: true }]));
+  });
+
+  describe("defaultStriker", () => {
+    const inningsOf = (events: ScoreEvent[]) => replay({ battingFirst: 1 }, events).innings[0];
+    const female: ScoreEvent = { type: "female", on: true };
+    const nextBowler: ScoreEvent = { type: "bowler", name: "Yusuf" };
+
+    it("asks at the start of a pair", () => {
+      expect(defaultStriker(inningsOf(start), 0)).toEqual({ striker: null, locked: false });
+    });
+
+    it("changes ends on odd running runs only, run outs included; not on boundary runs or wides", () => {
+      const after = (...list: Ball[]) => defaultStriker(inningsOf([...start, ...balls(list)]), 0).striker;
+      expect(after(a(1))).toBe(1); // a single: Ben faces next
+      expect(after(a(2))).toBe(0);
+      expect(after(a(1, 2))).toBe(1); // "2+1": the 1 was run
+      expect(after(a(0, 2))).toBe(0); // "2+0": bonus only, nobody ran
+      expect(after(a(0, 4))).toBe(0);
+      expect(after(a(3), wd)).toBe(1); // a wide changes nothing
+      expect(after({ t: "nb", runs: 1, striker: 0 })).toBe(1); // ran 1 off a no-ball
+      expect(after({ t: "out", striker: 0 })).toBe(0); // caught: nobody ran
+      expect(after({ t: "out", runs: 1, striker: 0, runOut: true })).toBe(1); // run out after 1: they had crossed
+      expect(after({ t: "out", runs: 1, striker: 0, runOut: true, nonStriker: true })).toBe(1); // whoever was out
+      expect(after({ t: "out", runs: 2, striker: 0, runOut: true })).toBe(0);
+      expect(after({ t: "out", striker: 0, runOut: true })).toBe(0); // run out going for the first run
+      expect(after({ t: "nb", runs: 1, out: true, striker: 0 })).toBe(1); // no-ball run out after 1
+    });
+
+    it("never changes ends after a run out in a mixed pair", () => {
+      const inn = inningsOf([...start, female, ...balls(times(6, b(1))), nextBowler, ...balls([{ t: "out", runs: 1, striker: 0, runOut: true }])]);
+      expect(defaultStriker(inn, 1)).toEqual({ striker: 0, locked: false });
+    });
+
+    it("carries strike into the pair's next over (all bowling is from one end)", () => {
+      expect(defaultStriker(inningsOf([...start, ...balls([...times(5, a(2)), a(1)]), nextBowler]), 1).striker).toBe(1);
+      expect(defaultStriker(inningsOf([...start, ...balls([...times(5, a(2)), a(0, 2)]), nextBowler]), 1).striker).toBe(0);
+    });
+
+    it("locks a female over to its first striker, with no change of ends", () => {
+      const inn = inningsOf([...start, female, ...balls([b(1), wd, b(3)])]);
+      expect(defaultStriker(inn, 0)).toEqual({ striker: 1, locked: true });
+    });
+
+    it("a mixed pair's other over starts on the partner and never changes ends", () => {
+      const femaleFirst = [...start, female, ...balls(times(6, b(1))), nextBowler];
+      expect(defaultStriker(inningsOf(femaleFirst), 1)).toEqual({ striker: 0, locked: false });
+      // He takes a single and stays on strike.
+      expect(defaultStriker(inningsOf([...femaleFirst, ...balls([a(1)])]), 1)).toEqual({ striker: 0, locked: false });
+      // Male over first, then a female over: the female batter is the one who didn't face it.
+      const femaleSecond = [...start, ...balls(times(6, a(2))), nextBowler, female];
+      expect(defaultStriker(inningsOf(femaleSecond), 1)).toEqual({ striker: 1, locked: false });
+    });
+
+    it("a new pair starts with no striker", () => {
+      const events = [
+        ...start,
+        ...balls(times(12, a(2))),
+        { type: "batters", names: ["Cara", "Dev"] } as ScoreEvent,
+        { type: "bowler", name: "Zed" } as ScoreEvent,
+      ];
+      expect(defaultStriker(inningsOf(events), 2)).toEqual({ striker: null, locked: false });
+    });
   });
 });

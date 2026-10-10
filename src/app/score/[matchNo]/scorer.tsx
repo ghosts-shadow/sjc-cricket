@@ -3,18 +3,22 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState, useSyncExternalStore, useTransition } from "react";
 import {
+  BONUS_VALUES,
   cleanName,
+  defaultStriker,
   MAX_NAME_LENGTH,
   namesBySide,
   OVERS_PER_INNINGS,
   replay,
   swapBattingFirst,
   type Ball,
+  type BatterLine,
   type OverCard,
   type PairNames,
   type Scorecard,
   type ScoreEvent,
   type ScoringSetup,
+  type Striker,
 } from "@/lib/scoring";
 import { resetScoring, submitScoring, syncScoring } from "../actions";
 
@@ -54,21 +58,35 @@ const SYNC_TEXT: Record<SyncStatus, string> = {
   error: "Not saved to server",
 };
 
-const RUN_BUTTONS = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+// Runs actually run. The boundary (bonus) part of a ball has its own panel, as on the paper scoresheet.
+const RUN_BUTTONS = [0, 1, 2, 3, 4, 5];
+// Boundaries that are the whole ball: the back net. 1-3 wait for the runs run with them ("2+1").
+const BACK_NET = [4, 6];
+
+const isBoundary = (ball: Ball) => (ball.t === "run" || ball.t === "nb") && (ball.bonus ?? 0) > 0;
+
+/** Runs off the bat as the scoresheet writes them: "2+1" for boundary + running, "4" for a back-net four. */
+function offBat(runs: number, bonus = 0): string {
+  return bonus && !(BACK_NET.includes(bonus) && runs === bonus) ? `${bonus}+${runs - bonus}` : String(runs);
+}
 
 export function chip(ball: Ball): string {
   switch (ball.t) {
     case "run":
-      return String(ball.runs);
+      return offBat(ball.runs, ball.bonus);
     case "out":
-      return ball.runs ? `W+${ball.runs}` : "W";
+      // RO = run out; plain W = caught, bowled, stumped. Runs completed before a run out still count.
+      if (ball.runOut || ball.runs) return ball.runs ? `RO+${ball.runs}` : "RO";
+      return "W";
     case "wd":
       return "Wd";
     case "db":
       return "Db";
-    case "nb":
-      if (ball.out) return ball.runs ? `Nb W+${ball.runs}` : "Nb W";
-      return ball.runs ? `Nb+${ball.runs}` : "Nb";
+    case "nb": {
+      if (ball.out) return ball.runs ? `Nb RO+${ball.runs}` : "Nb RO";
+      const bat = offBat(ball.runs, ball.bonus);
+      return ball.runs ? (bat.includes("+") ? `Nb+(${bat})` : `Nb+${bat}`) : "Nb";
+    }
   }
 }
 
@@ -108,11 +126,19 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
   const [synced, setSynced] = useState<{ rev: number; status: SyncStatus }>({ rev: 0, status: "saved" });
   const [retry, setRetry] = useState(0);
   const [nbPending, setNbPending] = useState(false);
-  // Run out picker open: on a legal ball, or on a no-ball. Both ask for the runs completed.
+  // Run out picker open: on a legal ball, or on a no-ball. It asks the runs completed, then which batter is out.
   const [runOut, setRunOut] = useState<null | "legal" | "nb">(null);
+  const [runOutRuns, setRunOutRuns] = useState<number | null>(null);
+  // The scorer's tap on the "on strike" toggle. It holds until the next ball off the bat, after which the
+  // rules-based default (with its change of ends) takes over again. Key: innings-over-balls faced.
+  const [strikerPick, setStrikerPick] = useState<{ at: string; striker: Striker } | null>(null);
+  // A 1, 2 or 3 tapped in the Boundary panel, waiting for the runs run with it.
+  const [bonusPending, setBonusPending] = useState<number | null>(null);
   const closePickers = () => {
     setNbPending(false);
     setRunOut(null);
+    setRunOutRuns(null);
+    setBonusPending(null);
   };
   const [submitted, setSubmitted] = useState(initial.submitted);
   const [superOver, setSuperOver] = useState<1 | 2 | null>(null);
@@ -257,6 +283,36 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
     pushMany(more);
   };
 
+  // Who's on strike: the scorer's tap, held until the next ball off the bat, else the rules-based default
+  // (which changes ends on odd running runs). Balls off the bat wait for it; wides and dead balls don't.
+  const facedInOver = openOver?.balls.filter((b) => b.t !== "wd" && b.t !== "db").length ?? 0;
+  const strikeKey = `${inningsIndex}-${overIndex}-${facedInOver}`;
+  const auto = innings ? defaultStriker(innings, overIndex) : { striker: null, locked: false };
+  const picked = strikerPick && strikerPick.at === strikeKey ? strikerPick.striker : null;
+  const striker = auto.locked ? auto.striker : (picked ?? auto.striker);
+  const noStriker = striker == null;
+  const pairLines = innings?.batters.filter((b) => b.pair === Math.floor(overIndex / 2)) ?? [];
+  /** A ball off the bat: the runs run, plus the boundary picked in the Boundary panel, if any. */
+  const offTheBat = (noBall: boolean, running: number, bonus = bonusPending ?? 0) => {
+    const detail = { runs: bonus + running, striker: striker!, ...(bonus ? { bonus } : {}) };
+    ball(noBall ? { t: "nb", ...detail } : { t: "run", ...detail });
+  };
+  /** Back net 4 / 6 is the whole ball. 1-3 wait for the runs run with them; tapping it again cancels. */
+  const pickBonus = (noBall: boolean) => (value: number) => {
+    if (BACK_NET.includes(value)) offTheBat(noBall, 0, value);
+    else setBonusPending((p) => (p === value ? null : value));
+  };
+  /** Last step of a run out: the batter who's out. The runs completed were picked first. */
+  const runOutBall = (who: Striker) => {
+    const runs = runOutRuns ?? 0;
+    const nonStriker = who !== striker ? { nonStriker: true as const } : {};
+    ball(
+      runOut === "nb"
+        ? { t: "nb", runs, out: true, striker: striker!, ...nonStriker }
+        : { t: "out", runs, striker: striker!, runOut: true, ...nonStriker },
+    );
+  };
+
   const submit = () => {
     if (!card.result) return;
     const winner = card.result.winner;
@@ -364,14 +420,22 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
                 </button>
               </p>
               <OverLine over={openOver} />
-              {runOut ? (
+              <StrikerToggle
+                names={pairNames!}
+                lines={pairLines}
+                striker={striker}
+                locked={auto.locked}
+                female={female}
+                onPick={(s) => setStrikerPick({ at: strikeKey, striker: s })}
+              />
+              {runOut && runOutRuns == null ? (
                 <div>
                   <p className="mb-2 text-sm font-medium">
-                    {runOut === "nb" ? "No-ball and run out: runs completed?" : "Run out: runs completed?"}
+                    {runOut === "nb" ? "No-ball and run out: runs completed first?" : "Run out: runs completed first?"}
                   </p>
                   <div className="grid grid-cols-4 gap-2">
                     {[0, 1, 2, 3, 4, 5, 6].map((r) => (
-                      <BigButton key={r} onClick={() => ball(runOut === "nb" ? { t: "nb", runs: r, out: true } : { t: "out", runs: r })}>
+                      <BigButton key={r} onClick={() => setRunOutRuns(r)}>
                         {r}
                       </BigButton>
                     ))}
@@ -380,19 +444,49 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
                     </BigButton>
                   </div>
                   <p className="mt-2 text-xs text-muted">
-                    −5 for the wicket. The runs completed still count{runOut === "nb" ? ", plus 1 for the no-ball (re-bowled)" : ""}.
+                    The runs completed before the run out still count for the striker
+                    {runOut === "nb" ? ", plus 1 for the no-ball (re-bowled)" : ""}. Next: which batter is out.
                   </p>
                 </div>
-              ) : nbPending ? (
+              ) : runOut ? (
                 <div>
-                  <p className="mb-2 text-sm font-medium">No-ball: runs off the bat, or run out?</p>
-                  <div className="grid grid-cols-5 gap-2">
-                    {[0, 1, 2, 3, 4, 5, 6].map((r) => (
-                      <BigButton key={r} onClick={() => ball({ t: "nb", runs: r })}>
-                        {r}
-                      </BigButton>
+                  <p className="mb-2 text-sm font-medium">
+                    Run out after {runOutRuns} run{runOutRuns === 1 ? "" : "s"}: which batter is out?
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {pairNames!.map((name, i) => (
+                      <button
+                        key={i}
+                        onClick={() => runOutBall(i as Striker)}
+                        className="min-h-14 min-w-0 rounded-md border border-danger/60 bg-danger-tint px-3 py-2.5 text-left font-medium active:scale-95"
+                      >
+                        <span className="block truncate">{name}</span>
+                        <span className="block text-xs font-normal text-muted">{striker === i ? "on strike" : "other end"}</span>
+                      </button>
                     ))}
-                    <BigButton tone="danger" onClick={() => setRunOut("nb")}>
+                  </div>
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
+                    <button onClick={() => setRunOutRuns(null)} className="rounded-md border border-line py-2.5">
+                      ← Runs
+                    </button>
+                    <button onClick={closePickers} className="rounded-md border border-line py-2.5">
+                      Cancel
+                    </button>
+                  </div>
+                  <p className="mt-2 text-xs text-muted">−5 against the batter you pick.</p>
+                </div>
+              ) : nbPending ? (
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">No-ball: what came off the bat?</p>
+                  <ShotPanels bonus={bonusPending} onBonus={pickBonus(true)} onRuns={(r) => offTheBat(true, r)} />
+                  <div className="grid grid-cols-2 gap-2">
+                    <BigButton
+                      tone="danger"
+                      onClick={() => {
+                        setBonusPending(null);
+                        setRunOut("nb");
+                      }}
+                    >
                       <span className="text-base">Run out</span>
                     </BigButton>
                     <BigButton tone="muted" onClick={closePickers}>
@@ -402,24 +496,32 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
                 </div>
               ) : (
                 <>
-                  <div className="grid grid-cols-3 gap-2">
-                    {RUN_BUTTONS.map((r) => (
-                      <BigButton key={r} onClick={() => ball({ t: "run", runs: r })}>
-                        {r}
-                      </BigButton>
-                    ))}
-                  </div>
+                  <ShotPanels bonus={bonusPending} disabled={noStriker} onBonus={pickBonus(false)} onRuns={(r) => offTheBat(false, r)} />
                   <div className="grid grid-cols-5 gap-2">
-                    <BigButton tone="danger" onClick={() => ball({ t: "out" })}>
+                    <BigButton tone="danger" disabled={noStriker} onClick={() => ball({ t: "out", striker: striker! })}>
                       OUT
                     </BigButton>
-                    <BigButton tone="danger" onClick={() => setRunOut("legal")}>
+                    <BigButton
+                      tone="danger"
+                      disabled={noStriker}
+                      onClick={() => {
+                        setBonusPending(null);
+                        setRunOut("legal");
+                      }}
+                    >
                       <span className="block text-base leading-tight">Run out</span>
                     </BigButton>
                     <BigButton tone="extra" onClick={() => ball({ t: "wd" })}>
                       WD
                     </BigButton>
-                    <BigButton tone="extra" onClick={() => setNbPending(true)}>
+                    <BigButton
+                      tone="extra"
+                      disabled={noStriker}
+                      onClick={() => {
+                        setBonusPending(null);
+                        setNbPending(true);
+                      }}
+                    >
                       NB
                     </BigButton>
                     <BigButton tone="extra" onClick={() => ball({ t: "db" })}>
@@ -551,7 +653,13 @@ function OverLine({ over }: { over: OverCard | null }) {
           <span
             key={i}
             className={`tabular rounded px-2 py-1 text-sm font-medium ${
-              b.t === "out" || (b.t === "nb" && b.out) ? "bg-danger text-card" : b.t === "run" ? "bg-soft" : "bg-warn-tint text-warn"
+              b.t === "out" || (b.t === "nb" && b.out)
+                ? "bg-danger text-card"
+                : isBoundary(b)
+                  ? "bg-cricket-tint text-cricket ring-1 ring-cricket"
+                  : b.t === "run"
+                    ? "bg-soft"
+                    : "bg-warn-tint text-warn"
             }`}
           >
             {chip(b)}
@@ -716,21 +824,134 @@ function BigButton({
   children,
   onClick,
   tone = "run",
+  disabled = false,
+  selected = false,
 }: {
   children: React.ReactNode;
   onClick: () => void;
-  tone?: "run" | "danger" | "extra" | "muted";
+  tone?: "run" | "boundary" | "danger" | "extra" | "muted";
+  disabled?: boolean;
+  selected?: boolean;
 }) {
   const tones = {
     run: "bg-soft border-line",
+    boundary: "bg-cricket-tint border-cricket text-foreground",
     danger: "bg-danger text-card border-danger",
     extra: "bg-warn-tint text-warn border-warn/40",
     muted: "bg-card border-line text-sm",
   };
   return (
-    <button onClick={onClick} className={`min-h-14 rounded-md border font-display text-2xl font-semibold active:scale-95 ${tones[tone]}`}>
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      aria-pressed={selected || undefined}
+      className={`min-h-14 rounded-md border font-display text-2xl font-semibold active:scale-95 disabled:opacity-35 disabled:active:scale-100 ${
+        selected ? "border-accent bg-accent text-white" : tones[tone]
+      }`}
+    >
       {children}
     </button>
+  );
+}
+
+/**
+ * The paper scoresheet's two parts of a ball off the bat: the boundary (bonus runs off the nets and posts)
+ * and the runs run. "2+1" is tap 2, then 1. A back-net 4 or 6 is the whole ball, so it counts at once.
+ */
+function ShotPanels({
+  bonus,
+  disabled = false,
+  onBonus,
+  onRuns,
+}: {
+  bonus: number | null;
+  disabled?: boolean;
+  onBonus: (value: number) => void;
+  onRuns: (running: number) => void;
+}) {
+  return (
+    <>
+      <div>
+        <p className={`mb-1 text-xs ${bonus ? "font-medium text-accent" : "text-muted"}`}>
+          {bonus ? `Boundary ${bonus}: now tap the runs run with it (0 if none)` : "Boundary: nets and posts 1–3, back net 4 or 6"}
+        </p>
+        <div className="grid grid-cols-5 gap-2">
+          {BONUS_VALUES.map((value) => (
+            <BigButton key={value} tone="boundary" selected={bonus === value} disabled={disabled} onClick={() => onBonus(value)}>
+              {value}
+              {BACK_NET.includes(value) && <span className="block font-sans text-[10px] font-normal leading-tight text-muted">back net</span>}
+            </BigButton>
+          ))}
+        </div>
+      </div>
+      <div>
+        <p className="mb-1 text-xs text-muted">Runs run</p>
+        <div className="grid grid-cols-3 gap-2">
+          {RUN_BUTTONS.map((r) => (
+            <BigButton key={r} disabled={disabled} onClick={() => onRuns(r)}>
+              {bonus ? `${bonus}+${r}` : r}
+            </BigButton>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
+/** The two batters of the pair; the highlighted one is credited with the next ball off the bat. */
+function StrikerToggle({
+  names,
+  lines,
+  striker,
+  locked,
+  female,
+  onPick,
+}: {
+  names: PairNames;
+  lines: BatterLine[];
+  striker: Striker | null;
+  locked: boolean;
+  female: boolean;
+  onPick: (striker: Striker) => void;
+}) {
+  const hint =
+    striker == null
+      ? female
+        ? "Female over: tap the female batter."
+        : "Who's on strike? Tap a name."
+      : locked
+        ? "Female batter stays on strike all over (undo to change)."
+        : "On strike. Swaps ends by itself on an odd number of runs run; tap a name to correct it.";
+  return (
+    <div className={`rounded-md border p-2 ${striker == null ? "border-warn bg-warn-tint" : "border-line"}`}>
+      <p className={`mb-1.5 text-xs ${striker == null ? "font-medium text-warn" : "text-muted"}`}>{hint}</p>
+      <div className="grid grid-cols-2 gap-2">
+        {names.map((name, i) => {
+          const line = lines.find((l) => l.name === name);
+          const on = striker === i;
+          return (
+            <button
+              key={i}
+              onClick={() => onPick(i as Striker)}
+              disabled={locked && !on}
+              className={`min-w-0 rounded-md border px-3 py-2 text-left disabled:opacity-40 ${
+                on ? "border-accent bg-cricket-tint text-foreground" : "border-line bg-card text-muted"
+              }`}
+            >
+              <span className="block truncate font-medium">
+                {on && <span aria-hidden="true">● </span>}
+                {name}
+              </span>
+              {line && (
+                <span className="tabular block text-xs text-muted">
+                  {line.runs} ({line.balls}){line.outs > 0 && ` · out ${line.outs}`}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -794,12 +1015,26 @@ function ScorecardView({ card, teamName }: { card: Scorecard; teamName: (t: 1 | 
             <ul className="mt-2 space-y-0.5 text-xs text-muted">
               {inn.pairTotals.map((total, p) =>
                 inn.overs.some((o) => o.pair === p) ? (
-                  <li key={p} className="flex justify-between gap-2">
-                    <span>
-                      Pair {p + 1}
-                      {inn.pairs[p] && `: ${inn.pairs[p]![0]} & ${inn.pairs[p]![1]}`}
-                    </span>
-                    <span className="tabular">{total}</span>
+                  <li key={p}>
+                    <div className="flex justify-between gap-2">
+                      <span>
+                        Pair {p + 1}
+                        {inn.pairs[p] && `: ${inn.pairs[p]![0]} & ${inn.pairs[p]![1]}`}
+                      </span>
+                      <span className="tabular">{total}</span>
+                    </div>
+                    {inn.batters
+                      .filter((b) => b.pair === p && (b.balls > 0 || b.outs > 0))
+                      .map((b) => (
+                        <div key={b.name} className="tabular flex justify-between gap-2 pl-3">
+                          <span className="truncate">
+                            {b.name} {b.runs} ({b.balls})
+                            {b.bonusRuns > 0 && ` · bdry ${b.bonusRuns}`}
+                            {b.outs > 0 && ` · out ${b.outs}`}
+                          </span>
+                          <span>{b.net}</span>
+                        </div>
+                      ))}
                   </li>
                 ) : null,
               )}
