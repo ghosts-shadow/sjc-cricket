@@ -10,6 +10,9 @@ export const SESSION_DAYS = 30;
 export interface SessionPayload {
   organiserId: number;
   name: string;
+  /** The login's sessionVersion when this cookie was issued. A PIN reset or disable bumps it,
+   * which signs that person out on every device. Cookies from before this existed count as 0. */
+  version: number;
 }
 
 function key() {
@@ -19,7 +22,7 @@ function key() {
 }
 
 export async function signSession(payload: SessionPayload): Promise<string> {
-  return new SignJWT({ name: payload.name })
+  return new SignJWT({ name: payload.name, v: payload.version })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(String(payload.organiserId))
     .setIssuedAt()
@@ -33,7 +36,8 @@ export async function verifySession(token: string | undefined): Promise<SessionP
     const { payload } = await jwtVerify(token, key(), { algorithms: ["HS256"] });
     const organiserId = Number(payload.sub);
     if (!Number.isInteger(organiserId) || typeof payload.name !== "string") return null;
-    return { organiserId, name: payload.name };
+    const version = Number.isInteger(payload.v) ? (payload.v as number) : 0;
+    return { organiserId, name: payload.name, version };
   } catch {
     return null;
   }

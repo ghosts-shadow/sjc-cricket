@@ -56,7 +56,7 @@ export async function login(_prev: FormState, formData: FormData): Promise<FormS
   await prisma.organiser.update({ where: { id: organiser.id }, data: { failedLogins: 0, lockedUntil: null } });
   let token: string;
   try {
-    token = await signSession({ organiserId: organiser.id, name: organiser.name });
+    token = await signSession({ organiserId: organiser.id, name: organiser.name, version: organiser.sessionVersion });
   } catch (err) {
     // A server setup problem (e.g. SESSION_SECRET missing or too short), not the organiser's fault.
     console.error("login: could not sign session", err);

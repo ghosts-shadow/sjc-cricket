@@ -5,7 +5,14 @@ import { useActionState } from "react";
 import { clearScoring, reopenScoring, type FormState } from "../../actions";
 
 /** Organiser controls for a match's live scoring: unlock a submitted scorer, or wipe it. */
-export function ScoringControls({ matchNo, session }: { matchNo: number; session: { submitted: boolean; balls: number } | null }) {
+export function ScoringControls({
+  matchNo,
+  session,
+}: {
+  matchNo: number;
+  /** by = the last login to send balls (or submit) from the scorer. */
+  session: { submitted: boolean; balls: number; by: string | null; at: string } | null;
+}) {
   const [reopenState, reopen, reopening] = useActionState<FormState, FormData>(reopenScoring, {});
   const [clearState, clear, clearing] = useActionState<FormState, FormData>(clearScoring, {});
   const message = clearState.message ?? reopenState.message;
@@ -19,7 +26,8 @@ export function ScoringControls({ matchNo, session }: { matchNo: number; session
         <h2 className="font-medium">Live scoring</h2>
         <p className="mt-1 text-muted">
           {session
-            ? `${balls} ball${balls === 1 ? "" : "s"} scored${submitted ? ", submitted (the scorer is locked)" : ", in progress"}. `
+            ? `${balls} ball${balls === 1 ? "" : "s"} scored${submitted ? ", submitted (the scorer is locked)" : ", in progress"}` +
+              `${session.by ? ` · last update by ${session.by}, ${session.at}` : ""}. `
             : "No live scoring for this match. "}
           <Link href={`/score/${matchNo}`} className="underline underline-offset-2">
             Open scorer

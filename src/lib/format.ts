@@ -12,6 +12,7 @@ const stampFormat = new Intl.DateTimeFormat("en-GB", {
   month: "short",
   hour: "numeric",
   minute: "2-digit",
+  hour12: true, // match times are 12-hour everywhere else ("5:00 PM")
 });
 
 /** "Sat 10 Oct" */

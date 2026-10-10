@@ -40,7 +40,7 @@ async function ScoreIndex() {
           <p className="mt-1 text-sm text-muted">Signed in as {me.name}. Pick the match you&apos;re scoring.</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {me.role === "organiser" && (
+          {me.role !== "scorer" && (
             <Link href="/admin" className="rounded-md border border-line px-3 py-1.5 text-sm hover:border-muted">
               Results
             </Link>

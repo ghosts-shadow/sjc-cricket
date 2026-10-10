@@ -38,7 +38,7 @@ async function MatchAdmin({ params }: { params: PageProps<"/admin/match/[matchNo
       orderBy: { at: "desc" },
       take: 10,
     }),
-    prisma.scoringSession.findUnique({ where: { matchId: match.id } }),
+    prisma.scoringSession.findUnique({ where: { matchId: match.id }, include: { updatedBy: { select: { name: true } } } }),
   ]);
   const sessionBalls = session ? (parseEvents(session.events) ?? []).filter((e) => e.type === "ball").length : 0;
   const teamName = new Map(teams.map((t) => [t.id, t.name]));
@@ -106,7 +106,19 @@ async function MatchAdmin({ params }: { params: PageProps<"/admin/match/[matchNo
       />
 
       {match.home && match.away && (
-        <ScoringControls matchNo={matchNo} session={session ? { submitted: session.submitted, balls: sessionBalls } : null} />
+        <ScoringControls
+          matchNo={matchNo}
+          session={
+            session
+              ? {
+                  submitted: session.submitted,
+                  balls: sessionBalls,
+                  by: session.updatedBy?.name ?? null,
+                  at: formatStamp(session.updatedAt.toISOString()),
+                }
+              : null
+          }
+        />
       )}
 
       {history.length > 0 && (

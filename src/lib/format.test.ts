@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { fromDubaiInputs, timeChangeText } from "./format";
+import { formatStamp, fromDubaiInputs, timeChangeText } from "./format";
 
 const at = (date: string, time: string) => fromDubaiInputs(date, time).toISOString();
+
+describe("formatStamp", () => {
+  it("uses the 12-hour clock in UAE time, like match times", () => {
+    expect(formatStamp(at("2026-10-08", "00:52")).replace(/ /g, " ")).toBe("Thu 8 Oct, 12:52 am");
+    expect(formatStamp(at("2026-10-10", "17:42")).replace(/ /g, " ")).toBe("Sat 10 Oct, 5:42 pm");
+  });
+});
 
 describe("timeChangeText", () => {
   it("is null for a match at its original time", () => {

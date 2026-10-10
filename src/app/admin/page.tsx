@@ -5,6 +5,7 @@ import { Suspense } from "react";
 import { GroupBadge, PastToggle } from "@/components/cricket";
 import { requireOrganiser } from "@/lib/auth";
 import { getTournament, type MatchView } from "@/lib/data";
+import { prisma } from "@/lib/db";
 import { dayKey, formatLongDay, formatTime } from "@/lib/format";
 import { logout } from "./actions";
 
@@ -27,6 +28,13 @@ const STATUS_CHIP: Record<MatchView["status"], string> = {
   POSTPONED: "Postponed",
 };
 
+/** "Live · Ciril" while a match is being scored; "scored by Ciril" once submitted from the scorer. */
+function ScoringTag({ info }: { info?: { submitted: boolean; by: string | null } }) {
+  if (!info) return null;
+  if (info.submitted) return <span>· scored by {info.by ?? "unknown"}</span>;
+  return <span className="rounded bg-cricket-tint px-1.5 py-0.5 font-medium text-accent">Live · {info.by ?? "scorer"}</span>;
+}
+
 async function Dashboard({ searchParams }: { searchParams: PageProps<"/admin">["searchParams"] }) {
   const organiser = await requireOrganiser();
   const showPast = (await searchParams).past === "1";
@@ -44,6 +52,12 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/admin">["
   }
   const firstOpenDay = showPast ? [...days.keys()].find((k) => k >= today) : undefined;
 
+  // Who is scoring (or scored) each match live: the last login to send balls from the scorer.
+  const sessions = await prisma.scoringSession.findMany({
+    select: { submitted: true, match: { select: { matchNo: true } }, updatedBy: { select: { name: true } } },
+  });
+  const scoring = new Map(sessions.map((s) => [s.match.matchNo, { submitted: s.submitted, by: s.updatedBy?.name ?? null }]));
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -58,6 +72,11 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/admin">["
           <Link href="/admin/contacts" className="rounded-md border border-line px-3 py-1.5 text-sm hover:border-muted">
             Team contacts
           </Link>
+          {organiser.role === "admin" && (
+            <Link href="/admin/users" className="rounded-md border border-line px-3 py-1.5 text-sm hover:border-muted">
+              Logins
+            </Link>
+          )}
           <form action={logout}>
             <button className="rounded-md border border-line px-3 py-1.5 text-sm hover:border-muted">Sign out</button>
           </form>
@@ -87,6 +106,7 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/admin">["
                     {STATUS_CHIP[m.status] && (
                       <span className="rounded bg-warn-tint px-1.5 py-0.5 font-medium text-warn">{STATUS_CHIP[m.status]}</span>
                     )}
+                    <ScoringTag info={scoring.get(m.matchNo)} />
                   </div>
                   <div className="mt-1 truncate">
                     {m.homeLabel}

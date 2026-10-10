@@ -103,8 +103,11 @@ model Organiser {
   name      String   @unique
   pinHash   String
   active    Boolean  @default(true)
-  // "organiser": everything. "scorer": live scoring only (no results, fixtures or contacts).
+  // "admin": everything plus managing logins. "organiser": results, fixtures, contacts, scoring.
+  // "scorer": live scoring only.
   role      String   @default("organiser")
+  // Bumped on PIN reset or disable; sessions issued before that stop working (see session-token.ts).
+  sessionVersion Int @default(0)
   createdAt DateTime @default(now())
   // Brute-force protection: 5 wrong PINs lock the login for 15 minutes.
   failedLogins Int       @default(0)
