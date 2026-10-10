@@ -12,15 +12,14 @@ import { prisma } from "@/lib/db";
 import { dayKey, fromDubaiInputs, isPastDay } from "@/lib/format";
 import { cleanName, MAX_NAME_LENGTH } from "@/lib/scoring";
 import { clearSession, reopenSession } from "@/lib/scoring-sessions";
-import { SESSION_COOKIE, SESSION_DAYS, signSession } from "@/lib/session-token";
+import { LOCK_MINUTES, MAX_FAILED_PINS, SESSION_COOKIE_OPTIONS } from "@/lib/session-cookie";
+import { SESSION_COOKIE, signSession } from "@/lib/session-token";
 
 export interface FormState {
   error?: string;
   message?: string;
 }
 
-const MAX_FAILED_LOGINS = 5;
-const LOCK_MINUTES = 15;
 // Compared against when the name is unknown, so a wrong name takes as long as a wrong PIN.
 const DUMMY_HASH = bcrypt.hashSync("not-a-real-pin", 10);
 
@@ -45,7 +44,7 @@ export async function login(_prev: FormState, formData: FormData): Promise<FormS
       await prisma.organiser.update({
         where: { id: organiser.id },
         data:
-          failed >= MAX_FAILED_LOGINS
+          failed >= MAX_FAILED_PINS
             ? { failedLogins: 0, lockedUntil: new Date(Date.now() + LOCK_MINUTES * 60_000) }
             : { failedLogins: failed },
       });
@@ -62,16 +61,10 @@ export async function login(_prev: FormState, formData: FormData): Promise<FormS
     console.error("login: could not sign session", err);
     return { error: "Sign-in isn't set up on the server yet. Your PIN is fine; tell the site admin." };
   }
-  (await cookies()).set(SESSION_COOKIE, token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-    maxAge: SESSION_DAYS * 24 * 60 * 60,
-  });
+  (await cookies()).set(SESSION_COOKIE, token, SESSION_COOKIE_OPTIONS);
   // Scorers only have the live scorer; organisers go wherever they were headed.
-  if (organiser.role === "scorer") redirect(/^\/score(\/|$)/.test(next) ? next : "/score");
-  redirect(/^\/(admin|score)(\/|$)/.test(next) ? next : "/admin");
+  if (organiser.role === "scorer") redirect(/^\/(score|account)(\/|$)/.test(next) ? next : "/score");
+  redirect(/^\/(admin|score|account)(\/|$)/.test(next) ? next : "/admin");
 }
 
 export async function logout() {

@@ -45,6 +45,9 @@ async function ScoreIndex() {
               Results
             </Link>
           )}
+          <Link href="/account" className="rounded-md border border-line px-3 py-1.5 text-sm hover:border-muted">
+            Change PIN
+          </Link>
           <form action={logout}>
             <button className="rounded-md border border-line px-3 py-1.5 text-sm hover:border-muted">Sign out</button>
           </form>
