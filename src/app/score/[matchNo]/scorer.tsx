@@ -70,20 +70,22 @@ function offBat(runs: number, bonus = 0): string {
   return bonus && !(BACK_NET.includes(bonus) && runs === bonus) ? `${bonus}+${runs - bonus}` : String(runs);
 }
 
+/** "1" or "(2+1)": runs before a run out, with any boundary part in brackets. */
+const withBonus = (runs: number, bonus = 0) => (bonus ? `(${offBat(runs, bonus)})` : String(runs));
+
 export function chip(ball: Ball): string {
   switch (ball.t) {
     case "run":
       return offBat(ball.runs, ball.bonus);
+    // Every wicket is W, however it happened (the organisers' Wickets list says how). W+2 = run out after 2 runs.
     case "out":
-      // RO = run out; plain W = caught, bowled, stumped. Runs completed before a run out still count.
-      if (ball.runOut || ball.runs) return ball.runs ? `RO+${ball.runs}` : "RO";
-      return "W";
+      return ball.runs ? `W+${withBonus(ball.runs, ball.bonus)}` : "W";
     case "wd":
-      return "Wd";
+      return ball.out ? "Wd W" : "Wd"; // the board writes "WD-5"
     case "db":
       return "Db";
     case "nb": {
-      if (ball.out) return ball.runs ? `Nb RO+${ball.runs}` : "Nb RO";
+      if (ball.out) return ball.runs ? `Nb W+${withBonus(ball.runs, ball.bonus)}` : "Nb W";
       const bat = offBat(ball.runs, ball.bonus);
       return ball.runs ? (bat.includes("+") ? `Nb+(${bat})` : `Nb+${bat}`) : "Nb";
     }
@@ -302,15 +304,34 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
     if (BACK_NET.includes(value)) offTheBat(noBall, 0, value);
     else setBonusPending((p) => (p === value ? null : value));
   };
-  /** Last step of a run out: the batter who's out. The runs completed were picked first. */
+  // Right after a plain wide, the scorer can turn it into a wicket on a wide (stumped or run out). Find the
+  // pair that faced it and who was on strike: a 6th wide can end the over, or even the pair's turn.
+  const last = events[events.length - 1];
+  let wideWicket: { names: PairNames; striker: Striker | null } | null = null;
+  if (!submitted && last?.type === "ball" && last.ball.t === "wd" && !last.ball.out) {
+    const inn = [...card.innings].reverse().find((i) => i.overs.some((o) => o.balls.length > 0));
+    const over = inn?.overs.filter((o) => o.balls.length > 0).pop();
+    const names = inn && over ? inn.pairs[over.pair] : null;
+    if (inn && over && names) wideWicket = { names, striker: over === openOver ? striker : defaultStriker(inn, over.index).striker };
+  }
+  /** Replace the last wide with the same wide plus a wicket: the wide's runs stand, then -5. */
+  const outOnLastWide = (who: Striker, runOut: boolean) => {
+    const onStrike = wideWicket?.striker ?? who; // not known yet: the batter picked stands for it
+    const wide: Ball = { t: "wd", out: true, striker: onStrike, ...(runOut ? { runOut: true } : {}), ...(who !== onStrike ? { nonStriker: true } : {}) };
+    change((d) => ({ setup: d.setup, events: [...d.events.slice(0, -1), { type: "ball", ball: wide }] }));
+    closePickers();
+    setError(null);
+  };
+  /** Last step of a run out: the batter who's out. Any boundary and the runs completed were picked first. */
   const runOutBall = (who: Striker) => {
-    const runs = runOutRuns ?? 0;
-    const nonStriker = who !== striker ? { nonStriker: true as const } : {};
-    ball(
-      runOut === "nb"
-        ? { t: "nb", runs, out: true, striker: striker!, ...nonStriker }
-        : { t: "out", runs, striker: striker!, runOut: true, ...nonStriker },
-    );
+    const bonus = bonusPending ?? 0;
+    const detail = {
+      runs: bonus + (runOutRuns ?? 0),
+      striker: striker!,
+      ...(bonus ? { bonus } : {}),
+      ...(who !== striker ? { nonStriker: true as const } : {}),
+    };
+    ball(runOut === "nb" ? { t: "nb", out: true, ...detail } : { t: "out", runOut: true, ...detail });
   };
 
   const submit = () => {
@@ -341,6 +362,8 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
       <Header label={label} team1={team1} team2={team2} sync={syncText} />
 
       <TotalsBar card={card} team1={team1} team2={team2} />
+
+      {wideWicket && <WideWicket key={events.length} names={wideWicket.names} striker={wideWicket.striker} onOut={outOnLastWide} />}
 
       {submitted && (
         <div className="rounded-lg border border-win/50 bg-win-tint p-4 text-sm">
@@ -429,29 +452,29 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
                 onPick={(s) => setStrikerPick({ at: strikeKey, striker: s })}
               />
               {runOut && runOutRuns == null ? (
-                <div>
-                  <p className="mb-2 text-sm font-medium">
-                    {runOut === "nb" ? "No-ball and run out: runs completed first?" : "Run out: runs completed first?"}
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">
+                    {runOut === "nb" ? "No-ball and run out: what was scored first?" : "Run out: what was scored first?"}
                   </p>
-                  <div className="grid grid-cols-4 gap-2">
-                    {[0, 1, 2, 3, 4, 5, 6].map((r) => (
-                      <BigButton key={r} onClick={() => setRunOutRuns(r)}>
-                        {r}
-                      </BigButton>
-                    ))}
-                    <BigButton tone="muted" onClick={closePickers}>
-                      Cancel
-                    </BigButton>
-                  </div>
-                  <p className="mt-2 text-xs text-muted">
-                    The runs completed before the run out still count for the striker
+                  <ShotPanels
+                    forRunOut
+                    bonus={bonusPending}
+                    onBonus={(value) => setBonusPending((p) => (p === value ? null : value))}
+                    onRuns={(r) => setRunOutRuns(r)}
+                  />
+                  <button onClick={closePickers} className="w-full rounded-md border border-line py-2.5 text-sm">
+                    Cancel
+                  </button>
+                  <p className="text-xs text-muted">
+                    The boundary and the runs completed before the run out still count for the striker
                     {runOut === "nb" ? ", plus 1 for the no-ball (re-bowled)" : ""}. Next: which batter is out.
                   </p>
                 </div>
               ) : runOut ? (
                 <div>
                   <p className="mb-2 text-sm font-medium">
-                    Run out after {runOutRuns} run{runOutRuns === 1 ? "" : "s"}: which batter is out?
+                    Run out after {bonusPending ? `${bonusPending}+${runOutRuns}` : `${runOutRuns} run${runOutRuns === 1 ? "" : "s"}`}: which batter is
+                    out?
                   </p>
                   <div className="grid grid-cols-2 gap-2">
                     {pairNames!.map((name, i) => (
@@ -653,7 +676,7 @@ function OverLine({ over }: { over: OverCard | null }) {
           <span
             key={i}
             className={`tabular rounded px-2 py-1 text-sm font-medium ${
-              b.t === "out" || (b.t === "nb" && b.out)
+              b.t === "out" || ((b.t === "nb" || b.t === "wd") && b.out)
                 ? "bg-danger text-card"
                 : isBoundary(b)
                   ? "bg-cricket-tint text-cricket ring-1 ring-cricket"
@@ -855,28 +878,81 @@ function BigButton({
 }
 
 /**
+ * Follow-up to a wide: was a batter also out on it? Stumping is only possible for the batter on strike;
+ * either batter can be run out. The wide still counts (+1 re-bowled, or +2 in a female over), then -5.
+ */
+function WideWicket({ names, striker, onOut }: { names: PairNames; striker: Striker | null; onOut: (who: Striker, runOut: boolean) => void }) {
+  const [open, setOpen] = useState(false);
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} className="w-full rounded-md border border-danger/60 py-2.5 text-sm font-medium text-danger">
+        Wicket on that wide? (stumped or run out)
+      </button>
+    );
+  }
+  return (
+    <div className="rounded-lg border border-danger/60 bg-danger-tint p-3">
+      <p className="mb-2 text-sm font-medium">Out on the wide: who, and how?</p>
+      <div className="grid grid-cols-2 gap-2">
+        {names.map((name, i) => (
+          <div key={i} className="min-w-0 space-y-1.5">
+            <p className="truncate text-sm font-medium">
+              {name}
+              <span className="block text-xs font-normal text-muted">{striker === null ? " " : striker === i ? "on strike" : "other end"}</span>
+            </p>
+            <button
+              onClick={() => onOut(i as Striker, false)}
+              disabled={striker !== null && striker !== i}
+              className="w-full rounded-md border border-danger bg-danger py-2.5 text-sm font-medium text-card disabled:opacity-35"
+            >
+              Stumped
+            </button>
+            <button onClick={() => onOut(i as Striker, true)} className="w-full rounded-md border border-danger bg-danger py-2.5 text-sm font-medium text-card">
+              Run out
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <p className="text-xs text-muted">The wide still counts, then −5 against the batter you pick.</p>
+        <button onClick={() => setOpen(false)} className="shrink-0 rounded-md border border-line px-3 py-2 text-sm">
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
  * The paper scoresheet's two parts of a ball off the bat: the boundary (bonus runs off the nets and posts)
  * and the runs run. "2+1" is tap 2, then 1. A back-net 4 or 6 is the whole ball, so it counts at once.
  */
 function ShotPanels({
   bonus,
   disabled = false,
+  forRunOut = false,
   onBonus,
   onRuns,
 }: {
   bonus: number | null;
   disabled?: boolean;
+  /** Run out: boundary 1-3 only (a back-net 4 or 6 is dead, nobody runs), and the runs completed. */
+  forRunOut?: boolean;
   onBonus: (value: number) => void;
   onRuns: (running: number) => void;
 }) {
+  const values = forRunOut ? BONUS_VALUES.filter((v) => !BACK_NET.includes(v)) : BONUS_VALUES;
+  const hint = bonus
+    ? `Boundary ${bonus}: now tap the runs ${forRunOut ? "completed" : "run"} with it (0 if none)`
+    : forRunOut
+      ? "Boundary first, if it hit a side net or post (skip if not)"
+      : "Boundary: nets and posts 1–3, back net 4 or 6";
   return (
     <>
       <div>
-        <p className={`mb-1 text-xs ${bonus ? "font-medium text-accent" : "text-muted"}`}>
-          {bonus ? `Boundary ${bonus}: now tap the runs run with it (0 if none)` : "Boundary: nets and posts 1–3, back net 4 or 6"}
-        </p>
-        <div className="grid grid-cols-5 gap-2">
-          {BONUS_VALUES.map((value) => (
+        <p className={`mb-1 text-xs ${bonus ? "font-medium text-accent" : "text-muted"}`}>{hint}</p>
+        <div className={`grid gap-2 ${forRunOut ? "grid-cols-3" : "grid-cols-5"}`}>
+          {values.map((value) => (
             <BigButton key={value} tone="boundary" selected={bonus === value} disabled={disabled} onClick={() => onBonus(value)}>
               {value}
               {BACK_NET.includes(value) && <span className="block font-sans text-[10px] font-normal leading-tight text-muted">back net</span>}
@@ -885,7 +961,7 @@ function ShotPanels({
         </div>
       </div>
       <div>
-        <p className="mb-1 text-xs text-muted">Runs run</p>
+        <p className="mb-1 text-xs text-muted">{forRunOut ? "Runs completed" : "Runs run"}</p>
         <div className="grid grid-cols-3 gap-2">
           {RUN_BUTTONS.map((r) => (
             <BigButton key={r} disabled={disabled} onClick={() => onRuns(r)}>

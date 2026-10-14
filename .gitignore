@@ -48,3 +48,6 @@ next-env.d.ts
 
 # session handoff notes: local paths and working state, not code
 handoff.md
+
+# Photos of the physical scoreboards (player names): never commit
+/physical scores/

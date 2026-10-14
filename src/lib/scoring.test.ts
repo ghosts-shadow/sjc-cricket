@@ -323,20 +323,104 @@ describe("per-batter scores", () => {
     expect(anil).toMatchObject({ runs: 2, balls: 2, outs: 1, net: -3 });
     expect(ben).toMatchObject({ runs: 1, balls: 2, outs: 3, net: -14 });
     expect(card.innings[0].dismissals).toEqual([
-      { over: 0, pair: 0, batter: "Anil", runOut: false, runs: 0, noBall: false },
-      { over: 0, pair: 0, batter: "Ben", runOut: true, runs: 2, noBall: false },
-      { over: 0, pair: 0, batter: "Ben", runOut: true, runs: 1, noBall: true },
-      { over: 0, pair: 0, batter: "Ben", runOut: true, runs: 0, noBall: false },
+      { over: 0, pair: 0, batter: "Anil", how: "out", runs: 0, bonus: 0, noBall: false, wide: false },
+      { over: 0, pair: 0, batter: "Ben", how: "run out", runs: 2, bonus: 0, noBall: false, wide: false },
+      { over: 0, pair: 0, batter: "Ben", how: "run out", runs: 1, bonus: 0, noBall: true, wide: false },
+      { over: 0, pair: 0, batter: "Ben", how: "run out", runs: 0, bonus: 0, noBall: false, wide: false },
     ]);
   });
 
   it("lists wickets from before per-batter scoring too, without a name", () => {
     const card = replay({ battingFirst: 1 }, [...start, ...balls([out, { t: "out", runs: 1 }])]);
     expect(card.innings[0].dismissals).toEqual([
-      { over: 0, pair: 0, batter: null, runOut: false, runs: 0, noBall: false },
+      { over: 0, pair: 0, batter: null, how: "out", runs: 0, bonus: 0, noBall: false, wide: false },
       // No runOut flag back then, but runs completed only happen on a run out.
-      { over: 0, pair: 0, batter: null, runOut: true, runs: 1, noBall: false },
+      { over: 0, pair: 0, batter: null, how: "run out", runs: 1, bonus: 0, noBall: false, wide: false },
     ]);
+  });
+
+  it("a run out can follow a boundary off the nets: (2+1) then run out keeps all 3 runs", () => {
+    const card = replay({ battingFirst: 1 }, [
+      ...start,
+      ...balls([
+        { t: "out", runs: 3, bonus: 2, striker: 0, runOut: true, nonStriker: true }, // 2 off the side net, ran 1, Ben run out
+        { t: "nb", runs: 2, bonus: 1, out: true, striker: 1 }, // no-ball: 1 off the post, ran 1, Ben run out
+      ]),
+    ]);
+    const inn = card.innings[0];
+    expect(inn.overs[0].total).toBe(3 - 5 + (1 + 2) - 5);
+    expect(inn.batters[0]).toMatchObject({ name: "Anil", runs: 3, bonusRuns: 2, outs: 0 });
+    expect(inn.batters[1]).toMatchObject({ name: "Ben", runs: 2, bonusRuns: 1, outs: 2 });
+    expect(inn.dismissals.map((d) => [d.batter, d.how, d.runs, d.bonus])).toEqual([
+      ["Ben", "run out", 3, 2],
+      ["Ben", "run out", 2, 1],
+    ]);
+    // Only the 1 run they ran counts for strike, so after the first ball they had crossed.
+    const afterFirst = replay({ battingFirst: 1 }, [...start, ...balls([{ t: "out", runs: 3, bonus: 2, striker: 0, runOut: true }])]);
+    expect(defaultStriker(afterFirst.innings[0], 0).striker).toBe(1);
+    expect(
+      parseEvents([
+        { type: "ball", ball: { t: "out", runs: 3, bonus: 2, striker: 0, runOut: true } },
+        { type: "ball", ball: { t: "nb", runs: 2, bonus: 1, out: true, striker: 1 } },
+      ]),
+    ).toEqual([
+      { type: "ball", ball: { t: "out", runs: 3, bonus: 2, striker: 0, runOut: true } },
+      { type: "ball", ball: { t: "nb", runs: 2, bonus: 1, out: true, striker: 1 } },
+    ]);
+  });
+
+  it("a wicket on a wide keeps the wide's runs and takes 5 (the board's WD-5)", () => {
+    // Normal over: +1, still re-bowled, -5.
+    const normal = summariseOver(0, false, [{ t: "wd", out: true, striker: 0 }, ...times(6, run(1))]);
+    expect(normal).toMatchObject({ wides: 1, wickets: 1, legalBalls: 6, total: 1 - 5 + 6 });
+    // Female over: +2, uses up the ball, -5.
+    const female = summariseOver(0, true, [{ t: "wd", out: true, striker: 1 }, ...times(5, run(0))]);
+    expect(female).toMatchObject({ wides: 1, wickets: 1, legalBalls: 6, complete: true, total: 2 - 5 });
+    // It still counts toward the wide escalation (the 4th wide here: +2).
+    expect(summariseOver(0, false, [wd, wd, wd, { t: "wd", out: true, striker: 0 }]).total).toBe(4 + 2 - 5);
+  });
+
+  it("match 24, Jesus Youth B's female over: WD WD (1+1) DB WD (WD-5) WD = 7, as on the board", () => {
+    const card = replay({ battingFirst: 1 }, [
+      ...start,
+      { type: "female", on: true },
+      ...balls([wd, wd, b(1, 1), db, wd, { t: "wd", out: true, striker: 1 }, wd]),
+    ]);
+    expect(card.innings[0].overs[0].total).toBe(7);
+  });
+
+  it("credits a wicket on a wide to whoever was out, without a ball faced", () => {
+    const card = replay({ battingFirst: 1 }, [
+      ...start,
+      ...balls([{ t: "wd", out: true, striker: 0 }, a(1), { t: "wd", out: true, runOut: true, striker: 1, nonStriker: true }]),
+    ]);
+    const [anil, ben] = card.innings[0].batters;
+    expect(anil).toMatchObject({ balls: 1, outs: 2, runs: 1 }); // stumped off the 1st wide, run out off the 2nd
+    expect(ben).toMatchObject({ balls: 0, outs: 0 });
+    expect(card.innings[0].unattributed).toBe(0);
+    expect(card.innings[0].dismissals).toEqual([
+      { over: 0, pair: 0, batter: "Anil", how: "stumped", runs: 0, bonus: 0, noBall: false, wide: true },
+      { over: 0, pair: 0, batter: "Anil", how: "run out", runs: 0, bonus: 0, noBall: false, wide: true },
+    ]);
+    // A wicket on a wide doesn't change who's on strike.
+    expect(defaultStriker(card.innings[0], 0).striker).toBe(1);
+  });
+
+  it("parseEvents keeps a wicket on a wide, and a plain wide stays plain", () => {
+    expect(
+      parseEvents([
+        { type: "ball", ball: { t: "wd", out: true, striker: 0, runOut: true, nonStriker: true } },
+        { type: "ball", ball: { t: "wd", out: true, striker: 1 } },
+        { type: "ball", ball: { t: "wd", striker: 1, runOut: true } },
+      ]),
+    ).toEqual([
+      { type: "ball", ball: { t: "wd", out: true, striker: 0, runOut: true, nonStriker: true } },
+      { type: "ball", ball: { t: "wd", out: true, striker: 1 } },
+      { type: "ball", ball: { t: "wd" } },
+    ]);
+    // Changing who bats first keeps the wicket (and its -5) but not who it was.
+    const swapped = swapBattingFirst({ battingFirst: 1 }, [...start, ...balls([{ t: "wd", out: true, striker: 1 }])]);
+    expect(swapped.events).toEqual(balls([{ t: "wd", out: true }]));
   });
 
   it("batters' net runs plus extras and penalties add up to the innings total", () => {
@@ -387,7 +471,7 @@ describe("per-batter scores", () => {
       { type: "ball", ball: { t: "out", striker: 1, runOut: true } },
       { type: "ball", ball: { t: "out", striker: 1 } },
       { type: "ball", ball: { t: "nb", runs: 4, striker: 1, bonus: 4 } },
-      { type: "ball", ball: { t: "nb", runs: 1, out: true, striker: 1, nonStriker: true } },
+      { type: "ball", ball: { t: "nb", runs: 1, out: true, striker: 1, bonus: 1, nonStriker: true } },
     ]);
   });
 

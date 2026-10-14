@@ -78,9 +78,12 @@ export function BattingCard({ card, teamName }: { card: Scorecard; teamName: (si
                         <span className="font-medium">{d.batter ?? `Pair ${d.pair + 1}`}</span>
                         <span className="text-muted">
                           {" "}
-                          {d.runOut ? "run out" : "out"}
-                          {d.runOut && d.runs > 0 && ` after ${d.runs} run${d.runs === 1 ? "" : "s"}`}
+                          {d.how}
+                          {d.how === "run out" &&
+                            d.runs > 0 &&
+                            ` after ${d.bonus ? `${d.bonus}+${d.runs - d.bonus}` : `${d.runs} run${d.runs === 1 ? "" : "s"}`}`}
                           {d.noBall && " (no-ball)"}
+                          {d.wide && " (wide)"}
                         </span>
                       </span>
                     </li>

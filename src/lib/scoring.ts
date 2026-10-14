@@ -21,19 +21,21 @@ export const BONUS_VALUES = [1, 2, 3, 4, 6] as const;
 export type Ball =
   // legal ball; runs = bonus + running. Balls scored before 17 Oct 2026 have no bonus split.
   | { t: "run"; runs: number; striker?: Striker; bonus?: number }
-  // legal ball; -5 from the pair. Caught/bowled etc.: no runs. runOut: runs = runs completed, which count;
-  // nonStriker: the batter at the other end was the one run out. (Before 11 Oct a run out had no runOut
+  // legal ball; -5 from the pair. Caught/bowled etc.: no runs. runOut: runs = runs completed, which count,
+  // plus any boundary (bonus) off the nets or posts before it; nonStriker: the batter at the other end was out. (Before 11 Oct a run out had no runOut
   // flag; one with runs completed is still known by its runs, one with none looks like a catch.)
-  | { t: "out"; runs?: number; striker?: Striker; runOut?: true; nonStriker?: true }
-  | { t: "wd" } // wide
+  | { t: "out"; runs?: number; bonus?: number; striker?: Striker; runOut?: true; nonStriker?: true }
+  // wide. out: a batter was also out on it (the board's "WD-5"): stumped, or runOut. The wide still counts;
+  // striker / nonStriker say who was out, as on other balls.
+  | { t: "wd"; out?: true; runOut?: true; striker?: Striker; nonStriker?: true }
   // no-ball; runs = runs off the bat, bonus + running (or completed, if run out)
   | { t: "nb"; runs: number; out?: boolean; striker?: Striker; bonus?: number; nonStriker?: true }
   | { t: "db" }; // dead ball
 
 /** Runs the batters actually ran on a ball off the bat. Only these change ends. */
 export function runningRuns(ball: Ball): number {
-  if (ball.t === "run" || ball.t === "nb") return ball.runs - (ball.bonus ?? 0);
-  return ball.t === "out" ? (ball.runs ?? 0) : 0;
+  if (ball.t === "run" || ball.t === "nb" || ball.t === "out") return (ball.runs ?? 0) - (ball.bonus ?? 0);
+  return 0;
 }
 
 export type PairNames = [string, string];
@@ -95,9 +97,12 @@ export interface Dismissal {
   pair: number; // 0-2
   /** Who was out; null when no striker was recorded (scored before 17 Oct 2026). */
   batter: string | null;
-  runOut: boolean;
-  runs: number; // completed before a run out; they still count
+  /** "out" = caught, bowled or stumped off a legal ball; "stumped" = off a wide. */
+  how: "out" | "run out" | "stumped";
+  runs: number; // before a run out, boundary included; they still count
+  bonus: number; // the boundary part of runs, e.g. 2 in "run out after 2+1"
   noBall: boolean;
+  wide: boolean;
 }
 
 export interface InningsCard {
@@ -188,6 +193,8 @@ export function summariseOver(index: number, female: boolean, balls: Ball[], bow
             card.endedBy = "wd";
           }
         }
+        // Stumped or run out off the wide: the wide's runs stand, and -5 for the wicket.
+        if (ball.out) card.wickets++;
         break;
       case "nb":
         // 1 run + runs off the bat + re-ball. 6th no-ball: 6 penalty runs, over ends.
@@ -255,15 +262,21 @@ export function parseEvents(input: unknown): ScoreEvent[] | null {
         const n = b.runs as number;
         events.push({
           type: "ball",
-          ball: b.out === true ? { t: "nb", runs: n, out: true, ...striker, ...nonStriker } : { t: "nb", runs: n, ...striker, ...bonus(n) },
+          ball: b.out === true ? { t: "nb", runs: n, out: true, ...striker, ...bonus(n), ...nonStriker } : { t: "nb", runs: n, ...striker, ...bonus(n) },
         });
       } else if (b.t === "out") {
         // runs only on a run out; a plain wicket has none
         const runOut = b.runOut === true ? { runOut: true as const } : {};
         if (b.runs === undefined || b.runs === 0) events.push({ type: "ball", ball: { t: "out", ...striker, ...runOut, ...nonStriker } });
-        else if (runs(b.runs)) events.push({ type: "ball", ball: { t: "out", runs: b.runs as number, ...striker, ...runOut, ...nonStriker } });
+        else if (runs(b.runs)) {
+          const n = b.runs as number;
+          events.push({ type: "ball", ball: { t: "out", runs: n, ...bonus(n), ...striker, ...runOut, ...nonStriker } });
+        }
         else return null;
-      } else if (b.t === "wd" || b.t === "db") events.push({ type: "ball", ball: { t: b.t } });
+      } else if (b.t === "wd") {
+        const runOut = b.runOut === true ? { runOut: true as const } : {};
+        events.push({ type: "ball", ball: b.out === true ? { t: "wd", out: true, ...striker, ...runOut, ...nonStriker } : { t: "wd" } });
+      } else if (b.t === "db") events.push({ type: "ball", ball: { t: "db" } });
       else return null;
     } else if (e.type === "female" && typeof e.on === "boolean") {
       events.push({ type: "female", on: e.on });
@@ -317,20 +330,26 @@ function battingLines(inn: InningsCard): Pick<InningsCard, "batters" | "unattrib
   for (const over of inn.overs) {
     const pair = lines[over.pair];
     for (const ball of over.balls) {
-      if (ball.t === "wd" || ball.t === "db") continue;
-      if (ball.t === "out" || (ball.t === "nb" && ball.out)) {
+      if (ball.t === "db") continue;
+      if (ball.t === "out" || ((ball.t === "nb" || ball.t === "wd") && ball.out)) {
         // A no-ball wicket can only be a run out; runs completed also mean a run out (older data).
-        const runOut = ball.t === "nb" || ball.runOut === true || (ball.runs ?? 0) > 0;
+        const runs = ball.t === "wd" ? 0 : (ball.runs ?? 0);
+        const bonus = ball.t === "wd" ? 0 : (ball.bonus ?? 0);
+        const runOut = ball.t === "nb" || ball.runOut === true || runs > 0;
         const who = ball.striker === undefined ? null : ball.nonStriker ? 1 - ball.striker : ball.striker;
+        if (who !== null && pair && ball.t === "wd") pair[who].outs++; // other wickets are counted below
         dismissals.push({
           over: over.index,
           pair: over.pair,
           batter: who === null ? null : (pair?.[who].name ?? null),
-          runOut,
-          runs: ball.runs ?? 0,
+          how: runOut ? "run out" : ball.t === "wd" ? "stumped" : "out",
+          runs,
+          bonus,
           noBall: ball.t === "nb",
+          wide: ball.t === "wd",
         });
       }
+      if (ball.t === "wd") continue; // nobody faced it
       if (!pair || ball.striker === undefined) {
         unattributed++;
         continue;
@@ -338,7 +357,7 @@ function battingLines(inn: InningsCard): Pick<InningsCard, "batters" | "unattrib
       const batter = pair[ball.striker];
       batter.balls++;
       batter.runs += ball.runs ?? 0;
-      if (ball.t !== "out" && ball.bonus) {
+      if (ball.bonus) {
         batter.bonusRuns += ball.bonus;
         if (ball.bonus === 4) batter.fours++;
         if (ball.bonus === 6) batter.sixes++;
