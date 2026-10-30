@@ -26,7 +26,7 @@ export function BattingCard({ card, teamName }: { card: Scorecard; teamName: (si
                       <th className="px-2 py-1.5 text-left font-semibold">Batter</th>
                       <th className={th} title="Runs off the bat">R</th>
                       <th className={th} title="Balls faced">B</th>
-                      <th className={th} title="Boundary runs: off the nets and posts">Bdry</th>
+                      <th className={th} title="Side runs: 1–3 off the side nets and posts">Side</th>
                       <th className={`${th} hidden sm:table-cell`} title="Back net on the bounce">4s</th>
                       <th className={`${th} hidden sm:table-cell`} title="Back net on the full, or out over">6s</th>
                       <th className={th} title="Times out (−5 each)">Out</th>
@@ -42,7 +42,7 @@ export function BattingCard({ card, teamName }: { card: Scorecard; teamName: (si
                         </td>
                         <td className={`${td} font-semibold`}>{b.runs}</td>
                         <td className={`${td} text-muted`}>{b.balls}</td>
-                        <td className={td}>{b.bonusRuns || "–"}</td>
+                        <td className={td}>{b.sideRuns || "–"}</td>
                         <td className={`${td} hidden sm:table-cell`}>{b.fours || "–"}</td>
                         <td className={`${td} hidden sm:table-cell`}>{b.sixes || "–"}</td>
                         <td className={td}>{b.outs || "–"}</td>
@@ -103,10 +103,67 @@ export function BattingCard({ card, teamName }: { card: Scorecard; teamName: (si
       })}
       {innings.some((inn) => inn.batters.some((b) => b.balls > 0 || b.outs > 0)) && (
         <p className="text-xs text-muted">
-          R is runs off the bat: boundary runs (Bdry, off the nets and posts) plus runs run, including runs completed before a run out. Extras and penalties count for the pair, not the
-          batter. Net is R minus 5 per out.
+          R is runs off the bat: side runs (1–3 off the side nets and posts), 4s and 6s off the back net, and runs run, including runs completed
+          before a run out. Extras and penalties count for the pair, not the batter. Net is R minus 5 per out.
         </p>
       )}
+    </section>
+  );
+}
+
+/**
+ * Per-bowler card for one match: each innings' bowlers are the other side. Every wicket in a bowler's over
+ * counts as theirs, run outs included; runs conceded include wides, no-balls and penalty runs.
+ */
+export function BowlingCard({ card, teamName }: { card: Scorecard; teamName: (side: 1 | 2) => string }) {
+  const innings = card.innings.filter((inn) => inn.bowlers.length > 0);
+  if (innings.length === 0) return null;
+  return (
+    <section className="space-y-3">
+      <h2 className="text-xs font-semibold uppercase tracking-[.12em] text-muted">Bowling</h2>
+      {innings.map((inn) => {
+        const fielding = inn.battingTeam === 1 ? 2 : 1;
+        // Which over(s) each bowler bowled, for the O1-O6 tag.
+        const oversOf = (name: string) =>
+          inn.overs.filter((o) => o.bowler?.toLowerCase() === name.toLowerCase() && o.balls.length > 0).map((o) => `O${o.index + 1}`);
+        return (
+          <div key={inn.battingTeam} className="overflow-hidden rounded-lg border border-line bg-card shadow-sm">
+            <div className="flex items-center justify-between gap-2 border-b border-line bg-soft px-3 py-2">
+              <h3 className="truncate font-display text-lg font-semibold leading-none">{teamName(fielding)}</h3>
+              <span className="shrink-0 text-xs text-muted">bowling to {teamName(inn.battingTeam)}</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="tabular w-full text-sm">
+                <thead className="text-[11px] uppercase tracking-[.1em] text-muted">
+                  <tr className="border-b border-line">
+                    <th className="px-2 py-1.5 text-left font-semibold">Bowler</th>
+                    <th className={th} title="Runs conceded: off the bat, wides, no-balls and penalty runs">R</th>
+                    <th className={th} title="Wickets: every wicket in the over, run outs included">W</th>
+                    <th className={th} title="Wides">Wd</th>
+                    <th className={th} title="No-balls">Nb</th>
+                    <th className={`${th} pr-2 text-foreground`} title="What the over added: runs minus 5 per wicket">Net</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {inn.bowlers.map((b) => (
+                    <tr key={b.name} className="border-b border-line last:border-0">
+                      <td className="max-w-36 truncate px-2 py-1.5 sm:max-w-56">
+                        <span className="mr-1.5 text-xs text-muted">{oversOf(b.name).join(" ")}</span>
+                        {b.name}
+                      </td>
+                      <td className={`${td} font-semibold`}>{b.runs}</td>
+                      <td className={td}>{b.wickets || "–"}</td>
+                      <td className={td}>{b.wides || "–"}</td>
+                      <td className={td}>{b.noBalls || "–"}</td>
+                      <td className={`${td} pr-2`}>{b.net}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })}
     </section>
   );
 }

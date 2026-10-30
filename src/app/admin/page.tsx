@@ -76,6 +76,9 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/admin">["
           <Link href="/admin/batting" className="rounded-md border border-line px-3 py-1.5 text-sm hover:border-muted">
             Batting
           </Link>
+          <Link href="/admin/bowling" className="rounded-md border border-line px-3 py-1.5 text-sm hover:border-muted">
+            Bowling
+          </Link>
           <Link href="/admin/contacts" className="rounded-md border border-line px-3 py-1.5 text-sm hover:border-muted">
             Team contacts
           </Link>

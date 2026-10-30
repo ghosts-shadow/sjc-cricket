@@ -7,7 +7,7 @@ import { requireOrganiser } from "@/lib/auth";
 import { getTournamentLive } from "@/lib/data";
 import { prisma } from "@/lib/db";
 import { formatDay, formatLongDay, formatStamp, formatTime, isPastDay } from "@/lib/format";
-import { BattingCard } from "@/components/batting";
+import { BattingCard, BowlingCard } from "@/components/batting";
 import { parseEvents, parseSetup, replay } from "@/lib/scoring";
 import { ResultForm } from "./result-form";
 import { ScoringControls } from "./scoring-controls";
@@ -126,6 +126,7 @@ async function MatchAdmin({ params }: { params: PageProps<"/admin/match/[matchNo
       )}
 
       {sessionCard && <BattingCard card={sessionCard} teamName={(side) => (side === 1 ? match.homeLabel : match.awayLabel)} />}
+      {sessionCard && <BowlingCard card={sessionCard} teamName={(side) => (side === 1 ? match.homeLabel : match.awayLabel)} />}
 
       {history.length > 0 && (
         <section>

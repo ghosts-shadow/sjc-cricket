@@ -303,9 +303,9 @@ describe("per-batter scores", () => {
       ...balls([a(0, 4), wd, a(1, 2), b(0, 6), db, b(2), b(4), { t: "nb", runs: 3, bonus: 2, striker: 1 }, a(0)]),
     ]);
     const [anil, ben] = card.innings[0].batters;
-    expect(anil).toMatchObject({ name: "Anil", pair: 0, runs: 7, balls: 3, bonusRuns: 6, fours: 1, sixes: 0, outs: 0, net: 7 });
+    expect(anil).toMatchObject({ name: "Anil", pair: 0, runs: 7, balls: 3, sideRuns: 2, fours: 1, sixes: 0, outs: 0, net: 7 });
     // Ben's 4 is all running, not a back-net four. The no-ball (2+1) counts as a ball faced.
-    expect(ben).toMatchObject({ name: "Ben", runs: 15, balls: 4, bonusRuns: 8, fours: 0, sixes: 1, outs: 0, net: 15 });
+    expect(ben).toMatchObject({ name: "Ben", runs: 15, balls: 4, sideRuns: 2, fours: 0, sixes: 1, outs: 0, net: 15 });
     expect(card.innings[0].unattributed).toBe(0);
   });
 
@@ -349,8 +349,8 @@ describe("per-batter scores", () => {
     ]);
     const inn = card.innings[0];
     expect(inn.overs[0].total).toBe(3 - 5 + (1 + 2) - 5);
-    expect(inn.batters[0]).toMatchObject({ name: "Anil", runs: 3, bonusRuns: 2, outs: 0 });
-    expect(inn.batters[1]).toMatchObject({ name: "Ben", runs: 2, bonusRuns: 1, outs: 2 });
+    expect(inn.batters[0]).toMatchObject({ name: "Anil", runs: 3, sideRuns: 2, outs: 0 });
+    expect(inn.batters[1]).toMatchObject({ name: "Ben", runs: 2, sideRuns: 1, outs: 2 });
     expect(inn.dismissals.map((d) => [d.batter, d.how, d.runs, d.bonus])).toEqual([
       ["Ben", "run out", 3, 2],
       ["Ben", "run out", 2, 1],
@@ -540,5 +540,65 @@ describe("per-batter scores", () => {
       ];
       expect(defaultStriker(inningsOf(events), 2)).toEqual({ striker: null, locked: false });
     });
+  });
+});
+
+describe("bowling figures", () => {
+  const balls = (list: Ball[]): ScoreEvent[] => list.map((ball) => ({ type: "ball", ball }));
+  const bat: ScoreEvent = { type: "batters", names: ["Anil", "Ben"] };
+  const bowl = (name: string): ScoreEvent => ({ type: "bowler", name });
+  const female: ScoreEvent = { type: "female", on: true };
+
+  it("credits the over to its bowler: runs conceded, every wicket (run outs too), extras, side runs and boundaries", () => {
+    const card = replay({ battingFirst: 1 }, [
+      bat,
+      bowl("Xavier"),
+      ...balls([
+        { t: "run", runs: 3, bonus: 2, striker: 0 }, // side 2 + 1 run
+        wd,
+        wd,
+        wd,
+        wd, // 4 wides: +4, and +2 for the 4th
+        { t: "run", runs: 6, bonus: 6, striker: 1 },
+        { t: "out", striker: 1 }, // caught
+        { t: "out", runs: 1, striker: 0, runOut: true }, // run out after 1: still counts for the bowler
+        { t: "nb", runs: 1, out: true, striker: 1 }, // no-ball run out
+        { t: "run", runs: 4, bonus: 4, striker: 1 },
+        db,
+        { t: "run", runs: 0, striker: 1 },
+      ]),
+    ]);
+    const inn = card.innings[0];
+    expect(inn.bowlers).toEqual([
+      { name: "Xavier", overs: 1, balls: 6, runs: 15 + 5 + 2, wickets: 3, wides: 4, noBalls: 1, deadBalls: 1, sideRuns: 2, fours: 1, sixes: 1, net: 7 },
+    ]);
+    // Every over has a bowler, so the bowlers' net adds up to the innings.
+    expect(inn.bowlers.reduce((sum, b) => sum + b.net, 0)).toBe(inn.runs);
+  });
+
+  it("groups a bowler's overs by name, counts a wicket on a wide, and skips overs with no bowler", () => {
+    const card = replay({ battingFirst: 1 }, [
+      bat,
+      bowl("Yusuf"),
+      female,
+      ...balls([wd, { t: "wd", out: true, striker: 0 }, ...times(4, run(1))]), // female over: wides +2 each and use a ball
+      bowl("yusuf"),
+      ...balls(times(6, run(2))),
+      { type: "batters", names: ["Cara", "Dev"] },
+      ...balls(times(6, run(1))), // nobody entered as bowler
+    ]);
+    const inn = card.innings[0];
+    expect(inn.bowlers).toEqual([
+      { name: "Yusuf", overs: 2, balls: 12, runs: 4 + 4 + 12, wickets: 1, wides: 2, noBalls: 0, deadBalls: 0, sideRuns: 0, fours: 0, sixes: 0, net: 3 + 12 },
+    ]);
+    expect(inn.runs).toBe(3 + 12 + 6);
+  });
+
+  it("puts each innings' bowlers on that innings (the fielding side)", () => {
+    const sixes = (runs: number) => balls(times(6, run(runs)));
+    const first = Array.from({ length: 6 }, (_, i) => [bowl(`B${i + 1}`), ...sixes(1)]).flat();
+    const card = replay({ battingFirst: 2 }, [...first, bowl("Zed"), ...sixes(2)]);
+    expect(card.innings[0].bowlers.map((b) => b.name)).toEqual(["B1", "B2", "B3", "B4", "B5", "B6"]);
+    expect(card.innings[1].bowlers).toEqual([expect.objectContaining({ name: "Zed", runs: 12, net: 12 })]);
   });
 });

@@ -3,13 +3,14 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState, useSyncExternalStore, useTransition } from "react";
 import {
-  BONUS_VALUES,
+  BOUNDARY_VALUES,
   cleanName,
   defaultStriker,
   MAX_NAME_LENGTH,
   namesBySide,
   OVERS_PER_INNINGS,
   replay,
+  SIDE_VALUES,
   swapBattingFirst,
   type Ball,
   type BatterLine,
@@ -58,19 +59,19 @@ const SYNC_TEXT: Record<SyncStatus, string> = {
   error: "Not saved to server",
 };
 
-// Runs actually run. The boundary (bonus) part of a ball has its own panel, as on the paper scoresheet.
+// Runs actually run. The side runs or boundary part of a ball has its own buttons, as on the paper scoresheet.
 const RUN_BUTTONS = [0, 1, 2, 3, 4, 5];
 // Boundaries that are the whole ball: the back net. 1-3 wait for the runs run with them ("2+1").
-const BACK_NET = [4, 6];
+const BACK_NET: readonly number[] = BOUNDARY_VALUES;
 
 const isBoundary = (ball: Ball) => (ball.t === "run" || ball.t === "nb") && (ball.bonus ?? 0) > 0;
 
-/** Runs off the bat as the scoresheet writes them: "2+1" for boundary + running, "4" for a back-net four. */
+/** Runs off the bat as the scoresheet writes them: "2+1" for side runs + running, "4" for a back-net four. */
 function offBat(runs: number, bonus = 0): string {
   return bonus && !(BACK_NET.includes(bonus) && runs === bonus) ? `${bonus}+${runs - bonus}` : String(runs);
 }
 
-/** "1" or "(2+1)": runs before a run out, with any boundary part in brackets. */
+/** "1" or "(2+1)": runs before a run out, with any side runs in brackets. */
 const withBonus = (runs: number, bonus = 0) => (bonus ? `(${offBat(runs, bonus)})` : String(runs));
 
 export function chip(ball: Ball): string {
@@ -134,7 +135,7 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
   // The scorer's tap on the "on strike" toggle. It holds until the next ball off the bat, after which the
   // rules-based default (with its change of ends) takes over again. Key: innings-over-balls faced.
   const [strikerPick, setStrikerPick] = useState<{ at: string; striker: Striker } | null>(null);
-  // A 1, 2 or 3 tapped in the Boundary panel, waiting for the runs run with it.
+  // A side 1, 2 or 3, waiting for the runs run with it.
   const [bonusPending, setBonusPending] = useState<number | null>(null);
   const closePickers = () => {
     setNbPending(false);
@@ -294,7 +295,7 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
   const striker = auto.locked ? auto.striker : (picked ?? auto.striker);
   const noStriker = striker == null;
   const pairLines = innings?.batters.filter((b) => b.pair === Math.floor(overIndex / 2)) ?? [];
-  /** A ball off the bat: the runs run, plus the boundary picked in the Boundary panel, if any. */
+  /** A ball off the bat: the runs run, plus the side runs or boundary picked, if any. */
   const offTheBat = (noBall: boolean, running: number, bonus = bonusPending ?? 0) => {
     const detail = { runs: bonus + running, striker: striker!, ...(bonus ? { bonus } : {}) };
     ball(noBall ? { t: "nb", ...detail } : { t: "run", ...detail });
@@ -322,7 +323,7 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
     closePickers();
     setError(null);
   };
-  /** Last step of a run out: the batter who's out. Any boundary and the runs completed were picked first. */
+  /** Last step of a run out: the batter who's out. Any side runs and the runs completed were picked first. */
   const runOutBall = (who: Striker) => {
     const bonus = bonusPending ?? 0;
     const detail = {
@@ -466,7 +467,7 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
                     Cancel
                   </button>
                   <p className="text-xs text-muted">
-                    The boundary and the runs completed before the run out still count for the striker
+                    Side runs and the runs completed before the run out still count for the striker
                     {runOut === "nb" ? ", plus 1 for the no-ball (re-bowled)" : ""}. Next: which batter is out.
                   </p>
                 </div>
@@ -924,8 +925,9 @@ function WideWicket({ names, striker, onOut }: { names: PairNames; striker: Stri
 }
 
 /**
- * The paper scoresheet's two parts of a ball off the bat: the boundary (bonus runs off the nets and posts)
- * and the runs run. "2+1" is tap 2, then 1. A back-net 4 or 6 is the whole ball, so it counts at once.
+ * The paper scoresheet's parts of a ball off the bat: side runs (1-3 off the side nets and posts) or a
+ * boundary (4 / 6 off the back net), and the runs run. "2+1" is tap side 2, then 1. A boundary is the
+ * whole ball, so it counts at once.
  */
 function ShotPanels({
   bonus,
@@ -936,28 +938,37 @@ function ShotPanels({
 }: {
   bonus: number | null;
   disabled?: boolean;
-  /** Run out: boundary 1-3 only (a back-net 4 or 6 is dead, nobody runs), and the runs completed. */
+  /** Run out: side runs only (on a back-net 4 or 6 the ball is dead and nobody runs), and the runs completed. */
   forRunOut?: boolean;
   onBonus: (value: number) => void;
   onRuns: (running: number) => void;
 }) {
-  const values = forRunOut ? BONUS_VALUES.filter((v) => !BACK_NET.includes(v)) : BONUS_VALUES;
-  const hint = bonus
-    ? `Boundary ${bonus}: now tap the runs ${forRunOut ? "completed" : "run"} with it (0 if none)`
-    : forRunOut
-      ? "Boundary first, if it hit a side net or post (skip if not)"
-      : "Boundary: nets and posts 1–3, back net 4 or 6";
+  const button = (value: number) => (
+    <BigButton key={value} tone="boundary" selected={bonus === value} disabled={disabled} onClick={() => onBonus(value)}>
+      {value}
+    </BigButton>
+  );
   return (
     <>
       <div>
-        <p className={`mb-1 text-xs ${bonus ? "font-medium text-accent" : "text-muted"}`}>{hint}</p>
-        <div className={`grid gap-2 ${forRunOut ? "grid-cols-3" : "grid-cols-5"}`}>
-          {values.map((value) => (
-            <BigButton key={value} tone="boundary" selected={bonus === value} disabled={disabled} onClick={() => onBonus(value)}>
-              {value}
-              {BACK_NET.includes(value) && <span className="block font-sans text-[10px] font-normal leading-tight text-muted">back net</span>}
-            </BigButton>
-          ))}
+        {bonus ? (
+          <p className="mb-1 text-xs font-medium text-accent">
+            Side {bonus}: now tap the runs {forRunOut ? "completed" : "run"} with it (0 if none)
+          </p>
+        ) : (
+          forRunOut && <p className="mb-1 text-xs text-muted">Side runs first, if it hit a side net or post (skip if not)</p>
+        )}
+        <div className="flex gap-2">
+          <div className="min-w-0 flex-[3]">
+            <p className="mb-1 text-xs text-muted">Side · nets &amp; posts</p>
+            <div className="grid grid-cols-3 gap-2">{SIDE_VALUES.map(button)}</div>
+          </div>
+          {!forRunOut && (
+            <div className="min-w-0 flex-[2] border-l border-line pl-2">
+              <p className="mb-1 text-xs text-muted">Boundary · back net</p>
+              <div className="grid grid-cols-2 gap-2">{BOUNDARY_VALUES.map(button)}</div>
+            </div>
+          )}
         </div>
       </div>
       <div>
@@ -1105,7 +1116,9 @@ function ScorecardView({ card, teamName }: { card: Scorecard; teamName: (t: 1 | 
                         <div key={b.name} className="tabular flex justify-between gap-2 pl-3">
                           <span className="truncate">
                             {b.name} {b.runs} ({b.balls})
-                            {b.bonusRuns > 0 && ` · bdry ${b.bonusRuns}`}
+                            {b.sideRuns > 0 && ` · side ${b.sideRuns}`}
+                            {b.fours > 0 && ` · ${b.fours}×4`}
+                            {b.sixes > 0 && ` · ${b.sixes}×6`}
                             {b.outs > 0 && ` · out ${b.outs}`}
                           </span>
                           <span>{b.net}</span>

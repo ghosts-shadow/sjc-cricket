@@ -12,11 +12,14 @@
 export type Striker = 0 | 1;
 
 /**
- * Bonus runs off the nets and posts, which the scoresheets call the "boundary" (the 2 in "2+1"):
- * 1-3 off the side nets and posts (plus any running), 2 for out of the court, 4 off the back net on
- * the bounce, 6 on the full or out over the back. Nothing is added for running on a 4 or a 6.
+ * Bonus runs (rules p.2-3), stored as a ball's `bonus`: the 2 in the scoresheet's "2+1".
+ * Side runs, 1-3: off the side nets and posts (plus any running), or 2 for out of the court.
+ * Boundaries, 4 / 6: off the back net on the bounce / on the full or out over the back. Nothing is added
+ * for running on a 4 or a 6.
  */
-export const BONUS_VALUES = [1, 2, 3, 4, 6] as const;
+export const SIDE_VALUES = [1, 2, 3] as const;
+export const BOUNDARY_VALUES = [4, 6] as const;
+export const BONUS_VALUES = [...SIDE_VALUES, ...BOUNDARY_VALUES] as const;
 
 export type Ball =
   // legal ball; runs = bonus + running. Balls scored before 17 Oct 2026 have no bonus split.
@@ -84,11 +87,27 @@ export interface BatterLine {
   pair: number; // 0-2
   runs: number; // off the bat: bonus + running, and runs completed before a run out
   balls: number; // faced: legal balls and no-balls, not wides or dead balls
-  bonusRuns: number; // the "boundary" part of runs: off the nets and posts
+  sideRuns: number; // side runs (1-3 off the nets and posts) within runs
   fours: number; // back net on the bounce
   sixes: number; // back net on the full, or out over the back
   outs: number; // a batter who is out keeps batting (rules p.2), so this can be more than 1
   net: number; // runs - 5 per out
+}
+
+/** One bowler's figures in an innings: usually a single over, since each bowls at most one (rules p.4). */
+export interface BowlerLine {
+  name: string;
+  overs: number;
+  balls: number; // legal balls (a female-over wide uses one up)
+  runs: number; // conceded: off the bat + wides/no-balls + escalation penalties, before any wickets
+  wickets: number; // every wicket in their overs, run outs included (Lost, 30 Oct)
+  wides: number;
+  noBalls: number;
+  deadBalls: number;
+  sideRuns: number; // side runs (1-3) conceded
+  fours: number;
+  sixes: number;
+  net: number; // what their overs added to the score: runs - 5 per wicket
 }
 
 /** One wicket (-5), so organisers can see who was out, how, and when. */
@@ -119,6 +138,8 @@ export interface InningsCard {
   unattributed: number;
   /** Every wicket in the innings, in order. */
   dismissals: Dismissal[];
+  /** The fielding side's bowlers, in the order they first bowled. Overs with no bowler entered are left out. */
+  bowlers: BowlerLine[];
 }
 
 export interface Scorecard {
@@ -315,14 +336,23 @@ function newInnings(battingTeam: 1 | 2): InningsCard {
     batters: [],
     unattributed: 0,
     dismissals: [],
+    bowlers: [],
   };
+}
+
+/** Count a ball's bonus as side runs (1-3) or a four / six (back net), for a batter or a bowler. */
+function addBonus(line: { sideRuns: number; fours: number; sixes: number }, bonus: number | undefined) {
+  if (!bonus) return;
+  if (bonus === 4) line.fours++;
+  else if (bonus === 6) line.sixes++;
+  else line.sideRuns += bonus;
 }
 
 /** Credit each ball to the batter on strike, and list the wickets. Wides and dead balls belong to no batter. */
 function battingLines(inn: InningsCard): Pick<InningsCard, "batters" | "unattributed" | "dismissals"> {
   const lines = inn.pairs.map((names, pair) =>
     names && inn.overs.some((o) => o.pair === pair)
-      ? names.map((name): BatterLine => ({ name, pair, runs: 0, balls: 0, bonusRuns: 0, fours: 0, sixes: 0, outs: 0, net: 0 }))
+      ? names.map((name): BatterLine => ({ name, pair, runs: 0, balls: 0, sideRuns: 0, fours: 0, sixes: 0, outs: 0, net: 0 }))
       : null,
   );
   let unattributed = 0;
@@ -357,17 +387,47 @@ function battingLines(inn: InningsCard): Pick<InningsCard, "batters" | "unattrib
       const batter = pair[ball.striker];
       batter.balls++;
       batter.runs += ball.runs ?? 0;
-      if (ball.bonus) {
-        batter.bonusRuns += ball.bonus;
-        if (ball.bonus === 4) batter.fours++;
-        if (ball.bonus === 6) batter.sixes++;
-      }
+      addBonus(batter, ball.bonus);
       if (ball.t === "out" || (ball.t === "nb" && ball.out)) pair[ball.nonStriker ? 1 - ball.striker : ball.striker].outs++;
     }
   }
   const batters = lines.flatMap((pair) => pair ?? []);
   for (const b of batters) b.net = b.runs - WICKET_DEDUCTION * b.outs;
   return { batters, unattributed, dismissals };
+}
+
+/** Each bowler's figures, from the overs they bowled (the same name in any case is one bowler). */
+function bowlingLines(inn: InningsCard): BowlerLine[] {
+  const byName = new Map<string, BowlerLine>();
+  for (const over of inn.overs) {
+    if (!over.bowler || over.balls.length === 0) continue;
+    const key = over.bowler.toLowerCase();
+    const line = byName.get(key) ?? {
+      name: over.bowler,
+      overs: 0,
+      balls: 0,
+      runs: 0,
+      wickets: 0,
+      wides: 0,
+      noBalls: 0,
+      deadBalls: 0,
+      sideRuns: 0,
+      fours: 0,
+      sixes: 0,
+      net: 0,
+    };
+    line.overs++;
+    line.balls += over.legalBalls;
+    line.runs += over.batRuns + over.extras + over.penalties;
+    line.wickets += over.wickets;
+    line.wides += over.wides;
+    line.noBalls += over.noBalls;
+    line.deadBalls += over.deadBalls;
+    line.net += over.total;
+    for (const ball of over.balls) if (ball.t === "run" || ball.t === "nb" || ball.t === "out") addBonus(line, ball.bonus);
+    byName.set(key, line);
+  }
+  return [...byName.values()];
 }
 
 type FacedBall = Exclude<Ball, { t: "wd" } | { t: "db" }> & { striker: Striker };
@@ -462,6 +522,7 @@ export function replay(setup: ScoringSetup, events: ScoreEvent[]): Scorecard {
     for (const over of inn.overs) inn.pairTotals[over.pair] += over.total;
     inn.runs = inn.pairTotals[0] + inn.pairTotals[1] + inn.pairTotals[2];
     Object.assign(inn, battingLines(inn));
+    inn.bowlers = bowlingLines(inn);
     for (const over of inn.overs) {
       if (over.warning) warnings.push(`Team ${inn.battingTeam}, over ${over.index + 1}: ${over.warning}`);
     }
