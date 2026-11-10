@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  battedAlready,
+  bowledAlready,
   defaultStriker,
+  femaleOverPlayers,
   namesBySide,
   parseEvents,
   parseSetup,
@@ -600,5 +603,101 @@ describe("bowling figures", () => {
     const card = replay({ battingFirst: 2 }, [...first, bowl("Zed"), ...sixes(2)]);
     expect(card.innings[0].bowlers.map((b) => b.name)).toEqual(["B1", "B2", "B3", "B4", "B5", "B6"]);
     expect(card.innings[1].bowlers).toEqual([expect.objectContaining({ name: "Zed", runs: 12, net: 12 })]);
+  });
+});
+
+describe("femaleOverPlayers", () => {
+  const balls = (list: Ball[]): ScoreEvent[] => list.map((ball) => ({ type: "ball", ball }));
+  const bowl = (name: string): ScoreEvent => ({ type: "bowler", name });
+  const female: ScoreEvent = { type: "female", on: true };
+  const faced = (striker: 0 | 1, n: number): Ball[] => times(n, { t: "run", runs: 1, striker });
+  const inningsOf = (events: ScoreEvent[]) => replay({ battingFirst: 1 }, events).innings[0];
+
+  it("names the female over's bowler and the batter who faced most of it, and nobody from normal overs", () => {
+    const inn = inningsOf([
+      { type: "batters", names: ["Priya", "Sam"] },
+      bowl("Meera"),
+      female,
+      ...balls([wd, ...faced(0, 4), ...faced(1, 1)]), // the wide uses a ball; one ball to Sam: still Priya's over
+      bowl("Tom"),
+      ...balls(faced(1, 6)),
+    ]);
+    expect(inn.overs[0].balls).toHaveLength(6);
+    expect(femaleOverPlayers(inn)).toEqual([{ bowler: "Meera", batter: "Priya" }]);
+  });
+
+  it("finds the female batter in either slot of the pair", () => {
+    const inn = inningsOf([{ type: "batters", names: ["Sam", "Priya"] }, bowl("Tom"), ...balls(faced(0, 6)), bowl("Meera"), female, ...balls(faced(1, 6))]);
+    expect(femaleOverPlayers(inn)).toEqual([{ bowler: "Meera", batter: "Priya" }]);
+  });
+
+  it("leaves out what wasn't recorded: no striker (before 17 Oct) or no bowler", () => {
+    const inn = inningsOf([{ type: "batters", names: ["Priya", "Sam"] }, female, ...balls(times(6, run(1)))]);
+    expect(femaleOverPlayers(inn)).toEqual([{ bowler: null, batter: null }]);
+  });
+});
+
+describe("bowledAlready", () => {
+  const bat: ScoreEvent = { type: "batters", names: ["Anil", "Ben"] };
+  const bowl = (name: string): ScoreEvent => ({ type: "bowler", name });
+  const six: ScoreEvent[] = times(6, run(1)).map((ball) => ({ type: "ball", ball }));
+  const inningsOf = (events: ScoreEvent[]) => replay({ battingFirst: 1 }, events).innings[0];
+
+  it("lists who bowled the finished overs when the next over is being set up", () => {
+    const inn = inningsOf([bat, bowl("Xavier"), ...six, bowl("Yusuf"), ...six]);
+    expect(inn.overs).toHaveLength(2);
+    expect(bowledAlready(inn, 2)).toEqual([
+      { name: "Xavier", over: 1 },
+      { name: "Yusuf", over: 2 },
+    ]);
+  });
+
+  it("leaves out the open over's own bowler, so that pick can still be corrected", () => {
+    const inn = inningsOf([bat, bowl("Xavier"), ...six, bowl("Yusuf"), ...six.slice(0, 2)]);
+    expect(bowledAlready(inn, 1)).toEqual([{ name: "Xavier", over: 1 }]);
+  });
+
+  it("counts a name once in any case, at its first over, and skips overs with no bowler", () => {
+    const inn = inningsOf([bat, bowl("Yusuf"), ...six, bowl("yusuf"), ...six, { type: "batters", names: ["Cara", "Dev"] }, ...six]);
+    expect(bowledAlready(inn, 3)).toEqual([{ name: "Yusuf", over: 1 }]);
+  });
+
+  it("starts empty: nobody has bowled before the first over, or in the other innings", () => {
+    const first = Array.from({ length: 6 }, (_, i) => [bowl(`B${i + 1}`), ...six]).flat();
+    const card = replay({ battingFirst: 1 }, [bat, ...first]);
+    expect(bowledAlready(inningsOf([bat]), 0)).toEqual([]);
+    expect(bowledAlready(card.innings[1], 0)).toEqual([]);
+  });
+});
+
+describe("battedAlready", () => {
+  const pair = (a: string, b: string): ScoreEvent => ({ type: "batters", names: [a, b] });
+  const six: ScoreEvent[] = times(6, run(1)).map((ball) => ({ type: "ball", ball }));
+  const inningsOf = (events: ScoreEvent[]) => replay({ battingFirst: 1 }, events).innings[0];
+  const pairOne = [pair("Anil", "Ben"), ...six, ...six];
+
+  it("lists the earlier pairs' batters when the next pair is being set up", () => {
+    expect(battedAlready(inningsOf(pairOne), 1)).toEqual([
+      { name: "Anil", pair: 1 },
+      { name: "Ben", pair: 1 },
+    ]);
+    const twoPairs = inningsOf([...pairOne, pair("Cara", "Dev"), ...six, ...six]);
+    expect(battedAlready(twoPairs, 2).map((b) => `${b.name} ${b.pair}`)).toEqual(["Anil 1", "Ben 1", "Cara 2", "Dev 2"]);
+  });
+
+  it("leaves out the current pair's own batters, so they can still be corrected", () => {
+    const inn = inningsOf([...pairOne, pair("Cara", "Dev"), ...six.slice(0, 2)]);
+    expect(battedAlready(inn, 1).map((b) => b.name)).toEqual(["Anil", "Ben"]);
+    expect(battedAlready(inningsOf([pair("Anil", "Ben"), ...six]), 0)).toEqual([]);
+  });
+
+  it("counts a name once in any case, at its first pair, and starts empty in the other innings", () => {
+    const inn = inningsOf([...pairOne, pair("ANIL", "Cara"), ...six, ...six]);
+    expect(battedAlready(inn, 2)).toEqual([
+      { name: "Anil", pair: 1 },
+      { name: "Ben", pair: 1 },
+      { name: "Cara", pair: 2 },
+    ]);
+    expect(battedAlready(replay({ battingFirst: 1 }, pairOne).innings[1], 0)).toEqual([]);
   });
 });

@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState, useSyncExternalStore, useTransition } from "react";
 import {
+  battedAlready,
   BOUNDARY_VALUES,
+  bowledAlready,
   cleanName,
   defaultStriker,
   MAX_NAME_LENGTH,
@@ -277,6 +279,10 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
   const pairNames = innings ? innings.pairs[Math.floor(overIndex / 2)] : null;
   const bowlerName = openOver?.bowler ?? null;
   const needPlayers = !pairNames || !bowlerName;
+  // Every fielder bowls one over and nobody bats in two pairs, so the lists leave out whoever has
+  // already bowled an earlier over or batted in another pair this innings.
+  const bowled = innings ? bowledAlready(innings, overIndex) : [];
+  const batted = innings ? battedAlready(innings, Math.floor(overIndex / 2)) : [];
   const savePlayers = (batters: PairNames | null, bowler: string) => {
     const more: ScoreEvent[] = [];
     if (batters && (batters[0] !== pairNames?.[0] || batters[1] !== pairNames?.[1])) {
@@ -427,6 +433,8 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
               bowlRoster={rosterFor(fieldingTeam)}
               pair={pairNames}
               bowler={bowlerName}
+              bowled={bowled}
+              batted={batted}
               askBatters={editingPlayers || !pairNames}
               onAdd={(side, name) => addName(side === "bat" ? battingTeam : fieldingTeam, name)}
               onSave={savePlayers}
@@ -701,12 +709,23 @@ function OverLine({ over }: { over: OverCard | null }) {
 const ADD_PLAYER = "__add__";
 const pickerClass = "mt-1 w-full rounded-md border border-edge bg-background px-3 py-2.5 text-base";
 
+/** Players who've already had their turn this innings: left out of a picker's list until "Show all". */
+interface Taken {
+  /** "bowled" or "batted", for "2 who already bowled are hidden." */
+  verb: string;
+  /** The rule, shown when one of them is picked anyway. */
+  rule: string;
+  /** Each name with what they did: "bowled over 2", "batted in pair 1". */
+  players: { name: string; did: string }[];
+}
+
 /** A roster dropdown whose last option, "+ Add player…", turns it into a name box. */
 function NamePicker({
   label,
   options,
   value,
   exclude,
+  taken,
   onChange,
   onAdd,
 }: {
@@ -715,17 +734,25 @@ function NamePicker({
   value: string | null;
   /** A name taken by the other picker (the other batter), shown but not selectable. */
   exclude?: string | null;
+  /** Who already bowled or batted this innings. A mis-tap can't pick them; "Show all" still can. */
+  taken?: Taken;
   onChange: (name: string) => void;
   onAdd: (name: string) => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState("");
+  const didAlready = (name: string | null) => taken?.players.find((p) => sameName(p.name, name))?.did ?? null;
+  // Starts open when the current pick is one of them, so the dropdown can still show it.
+  const [showTaken, setShowTaken] = useState(() => didAlready(value) != null);
+  const hidden = showTaken ? 0 : options.filter((o) => didAlready(o) != null).length;
+  const pickedDid = didAlready(value);
 
   const commit = () => {
     const name = cleanName(draft);
     if (!name) return;
     const existing = options.find((o) => sameName(o, name));
     if (!existing) onAdd(name);
+    else if (didAlready(existing) != null) setShowTaken(true); // a hidden name, typed on purpose
     onChange(existing ?? name);
     setAdding(false);
     setDraft("");
@@ -757,24 +784,43 @@ function NamePicker({
   }
 
   return (
-    <label className="block">
-      <span className="text-xs text-muted">{label}</span>
-      <select
-        value={value ?? ""}
-        onChange={(e) => (e.target.value === ADD_PLAYER ? setAdding(true) : onChange(e.target.value))}
-        className={pickerClass}
-      >
-        <option value="" disabled>
-          Choose…
-        </option>
-        {options.map((name) => (
-          <option key={name} value={name} disabled={sameName(name, exclude ?? null)}>
-            {name}
+    <div>
+      <label className="block">
+        <span className="text-xs text-muted">{label}</span>
+        <select
+          value={value ?? ""}
+          onChange={(e) => (e.target.value === ADD_PLAYER ? setAdding(true) : onChange(e.target.value))}
+          className={pickerClass}
+        >
+          <option value="" disabled>
+            Choose…
           </option>
-        ))}
-        <option value={ADD_PLAYER}>+ Add player…</option>
-      </select>
-    </label>
+          {options.map((name) => {
+            const did = didAlready(name);
+            if (did != null && !showTaken) return null;
+            return (
+              <option key={name} value={name} disabled={sameName(name, exclude ?? null)}>
+                {did != null ? `${name} (${did})` : name}
+              </option>
+            );
+          })}
+          <option value={ADD_PLAYER}>+ Add player…</option>
+        </select>
+      </label>
+      {hidden > 0 && (
+        <p className="mt-1 text-xs text-muted">
+          {hidden} who already {taken?.verb} {hidden === 1 ? "is" : "are"} hidden.{" "}
+          <button onClick={() => setShowTaken(true)} className="underline underline-offset-2">
+            Show all
+          </button>
+        </p>
+      )}
+      {pickedDid != null && (
+        <p className="mt-1 text-xs text-warn">
+          {value} already {pickedDid}. {taken?.rule}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -787,6 +833,8 @@ function PlayersForm({
   bowlRoster,
   pair,
   bowler,
+  bowled,
+  batted,
   askBatters,
   onAdd,
   onSave,
@@ -799,6 +847,10 @@ function PlayersForm({
   bowlRoster: string[];
   pair: PairNames | null;
   bowler: string | null;
+  /** Who bowled an earlier over this innings: kept out of the bowler list. */
+  bowled: { name: string; over: number }[];
+  /** Who batted in the innings' other pairs: kept out of both batter lists. */
+  batted: { name: string; pair: number }[];
   askBatters: boolean;
   onAdd: (side: "bat" | "bowl", name: string) => void;
   onSave: (batters: PairNames | null, bowler: string) => void;
@@ -807,6 +859,8 @@ function PlayersForm({
   const [b1, setB1] = useState<string | null>(pair?.[0] ?? null);
   const [b2, setB2] = useState<string | null>(pair?.[1] ?? null);
   const [bowl, setBowl] = useState<string | null>(bowler);
+  const bowledTaken: Taken = { verb: "bowled", rule: "Every fielder bowls one over.", players: bowled.map((b) => ({ name: b.name, did: `bowled over ${b.over}` })) };
+  const battedTaken: Taken = { verb: "batted", rule: "Nobody bats in two pairs.", players: batted.map((b) => ({ name: b.name, did: `batted in pair ${b.pair}` })) };
   const battersOk = !askBatters || (b1 != null && b2 != null && !sameName(b1, b2));
   const ready = battersOk && bowl != null;
 
@@ -815,8 +869,8 @@ function PlayersForm({
       <p className="text-sm font-medium">{title}</p>
       {askBatters ? (
         <>
-          <NamePicker label={`Batter 1 · ${battingTeam}`} options={batRoster} value={b1} exclude={b2} onChange={setB1} onAdd={(n) => onAdd("bat", n)} />
-          <NamePicker label={`Batter 2 · ${battingTeam}`} options={batRoster} value={b2} exclude={b1} onChange={setB2} onAdd={(n) => onAdd("bat", n)} />
+          <NamePicker label={`Batter 1 · ${battingTeam}`} options={batRoster} value={b1} exclude={b2} taken={battedTaken} onChange={setB1} onAdd={(n) => onAdd("bat", n)} />
+          <NamePicker label={`Batter 2 · ${battingTeam}`} options={batRoster} value={b2} exclude={b1} taken={battedTaken} onChange={setB2} onAdd={(n) => onAdd("bat", n)} />
         </>
       ) : (
         pair && (
@@ -825,7 +879,7 @@ function PlayersForm({
           </p>
         )
       )}
-      <NamePicker label={`Bowler · ${fieldingTeam}`} options={bowlRoster} value={bowl} onChange={setBowl} onAdd={(n) => onAdd("bowl", n)} />
+      <NamePicker label={`Bowler · ${fieldingTeam}`} options={bowlRoster} value={bowl} taken={bowledTaken} onChange={setBowl} onAdd={(n) => onAdd("bowl", n)} />
       <div className="flex gap-2">
         {onCancel && (
           <button onClick={onCancel} className="rounded-md border border-line px-4 py-2.5 text-sm">

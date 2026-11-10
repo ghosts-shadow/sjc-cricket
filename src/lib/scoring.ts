@@ -430,7 +430,53 @@ function bowlingLines(inn: InningsCard): BowlerLine[] {
   return [...byName.values()];
 }
 
-type FacedBall = Exclude<Ball, { t: "wd" } | { t: "db" }> & { striker: Striker };
+/**
+ * Who played each female over: its bowler, and the batter on strike for most of its balls. Rules p.5
+ * make both of them female, which the leaderboards use, since most players have no gender saved.
+ * Either is null when the scorer didn't record it (no bowler entered, or no striker before 17 Oct).
+ */
+export function femaleOverPlayers(inn: InningsCard): { bowler: string | null; batter: string | null }[] {
+  return inn.overs
+    .filter((over) => over.female && over.balls.length > 0)
+    .map((over) => {
+      const faced = [0, 0];
+      for (const ball of over.balls) if (ball.t !== "db" && ball.striker !== undefined) faced[ball.striker]++;
+      const names = inn.pairs[over.pair];
+      const striker = faced[0] + faced[1] === 0 ? null : faced[1] > faced[0] ? 1 : 0;
+      return { bowler: over.bowler, batter: names && striker !== null ? names[striker] : null };
+    });
+}
+
+/**
+ * Fielders who have already bowled in this innings, with the over each bowled (counting from 1). Every
+ * fielder bowls exactly one over (rules p.4), so the scorer leaves them out when it asks for the next
+ * bowler. `exceptOver` is the over being set up or corrected: its own bowler stays pickable.
+ */
+export function bowledAlready(inn: InningsCard, exceptOver: number): { name: string; over: number }[] {
+  const seen = new Map<string, { name: string; over: number }>();
+  for (const over of inn.overs) {
+    if (!over.bowler || over.index === exceptOver) continue;
+    const key = over.bowler.toLowerCase();
+    if (!seen.has(key)) seen.set(key, { name: over.bowler, over: over.index + 1 });
+  }
+  return [...seen.values()];
+}
+
+/**
+ * Batters from the innings' other pairs, with the pair each batted in (counting from 1). Three pairs bat
+ * two overs each, so nobody bats in two pairs and the scorer leaves them out when it asks for the next
+ * pair. `exceptPair` is the pair being set up or corrected: its own two batters stay pickable.
+ */
+export function battedAlready(inn: InningsCard, exceptPair: number): { name: string; pair: number }[] {
+  const seen = new Map<string, { name: string; pair: number }>();
+  inn.pairs.forEach((names, pair) => {
+    if (!names || pair === exceptPair) return;
+    for (const name of names) if (!seen.has(name.toLowerCase())) seen.set(name.toLowerCase(), { name, pair: pair + 1 });
+  });
+  return [...seen.values()];
+}
+
+type FacedBall =Exclude<Ball, { t: "wd" } | { t: "db" }> & { striker: Striker };
 
 /**
  * Who the scorer's "on strike" toggle starts on for the next ball. The scorer can always tap the other name.
