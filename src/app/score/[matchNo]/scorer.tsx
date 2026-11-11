@@ -7,14 +7,19 @@ import {
   BOUNDARY_VALUES,
   bowledAlready,
   cleanName,
+  correctBall,
   defaultStriker,
+  isRunOut,
+  isWicket,
   MAX_NAME_LENGTH,
   namesBySide,
   OVERS_PER_INNINGS,
   replay,
+  runningRuns,
   SIDE_VALUES,
   swapBattingFirst,
   type Ball,
+  type BallAt,
   type BatterLine,
   type OverCard,
   type PairNames,
@@ -67,6 +72,13 @@ const RUN_BUTTONS = [0, 1, 2, 3, 4, 5];
 const BACK_NET: readonly number[] = BOUNDARY_VALUES;
 
 const isBoundary = (ball: Ball) => (ball.t === "run" || ball.t === "nb") && (ball.bonus ?? 0) > 0;
+
+/** Who was on strike for a ball, if it recorded one. A plain wide and a dead ball don't. */
+const strikerOf = (ball: Ball | null) => (ball && ball.t !== "db" ? ball.striker : undefined);
+
+/** A ball's colours on the over line and the scorecard: wicket, side runs or boundary, plain run, or an extra. */
+const chipTone = (ball: Ball) =>
+  isWicket(ball) ? "bg-danger text-card" : isBoundary(ball) ? "bg-cricket-tint text-cricket ring-1 ring-cricket" : ball.t === "run" ? "bg-soft" : "bg-warn-tint text-warn";
 
 /** Runs off the bat as the scoresheet writes them: "2+1" for side runs + running, "4" for a back-net four. */
 function offBat(runs: number, bonus = 0): string {
@@ -151,6 +163,9 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
   // Names added on this phone that haven't been used in an event yet.
   const [added, setAdded] = useState<Rosters>({ 1: [], 2: [] });
   const [editingPlayers, setEditingPlayers] = useState(false);
+  // The ball being corrected in the "Change a ball" sheet, and a reminder left behind by the last correction.
+  const [correcting, setCorrecting] = useState<BallAt | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [submitting, startSubmit] = useTransition();
   const [resetting, startReset] = useTransition();
   const { setup, events } = doc;
@@ -198,6 +213,7 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
     closePickers();
     setEditingPlayers(false);
     setError(null);
+    setNotice(null);
   };
   const push = (event: ScoreEvent) => pushMany([event]);
   const startOver = () => {
@@ -239,6 +255,33 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
   const undo = () => {
     change((d) => ({ setup: d.setup, events: d.events.slice(0, -1) }));
     closePickers();
+    setNotice(null);
+  };
+  const startCorrecting = (at: BallAt) => {
+    closePickers();
+    setNotice(null);
+    setCorrecting(at);
+  };
+  /** Save a corrected ball. Nothing after it is undone; the scorecard is rebuilt from the corrected list. */
+  const saveCorrection = (at: BallAt, was: Ball, now: Ball, next: ScoreEvent[]) => {
+    change((d) => ({ setup: d.setup, events: next }));
+    setCorrecting(null);
+    setError(null);
+    // Batters change ends on an odd number of runs run, so a new count (or a new striker) can mean the balls
+    // after it were credited to the wrong batter. Those are left as scored: the scorer checks them.
+    const inn = replay(setup!, next).innings[at.innings];
+    const over = inn.overs[at.over];
+    const [before, after] = [strikerOf(was), strikerOf(now)];
+    const moved = runningRuns(was) % 2 !== runningRuns(now) % 2 || before !== after;
+    const later = over.balls.length > at.ball + 1 || (at.over % 2 === 0 && (inn.overs[at.over + 1]?.balls.length ?? 0) > 0);
+    const what = was.t === now.t && chip(was) === chip(now) ? `Changed over ${at.over + 1}, ball ${at.ball + 1}.` : `Changed ${chip(was)} to ${chip(now)}.`;
+    if (over.female && before !== undefined && after !== undefined && before !== after) {
+      setNotice(`${what} ${inn.pairs[over.pair]?.[after] ?? "That batter"} now faces every ball of that female over.`);
+    } else if (moved && later && !over.female) {
+      setNotice(`${what} That can change who was on strike afterwards: check the balls after it, and tap any that went to the wrong batter.`);
+    } else {
+      setNotice(what);
+    }
   };
 
   if (!setup || !card) {
@@ -367,6 +410,9 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
   return (
     <div className="mx-auto max-w-md space-y-4 pb-10">
       <Header label={label} team1={team1} team2={team2} sync={syncText} />
+      {!submitted && (
+        <p className="-mt-2 text-xs text-muted">Viewers see this match one over behind. Scored a ball wrong? Undo it, or tap the ball to change it.</p>
+      )}
 
       <TotalsBar card={card} team1={team1} team2={team2} />
 
@@ -451,7 +497,7 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
                   Change
                 </button>
               </p>
-              <OverLine over={openOver} />
+              <OverLine over={openOver} onEdit={(ball) => startCorrecting({ innings: inningsIndex!, over: overIndex, ball })} />
               <StrikerToggle
                 names={pairNames!}
                 lines={pairLines}
@@ -619,6 +665,11 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
       )}
 
       {error && <p className="text-sm text-loss">{error}</p>}
+      {notice && !submitted && (
+        <p role="status" className="rounded-lg border border-line bg-soft p-3 text-sm">
+          {notice}
+        </p>
+      )}
       {card.warnings.length > 0 && (
         <ul className="space-y-1 rounded-lg border border-warn/40 bg-warn-tint p-3 text-sm">
           {card.warnings.map((w) => (
@@ -627,12 +678,26 @@ function ScorerApp({ matchNo, label, team1, team2, knockout, rosters, initial }:
         </ul>
       )}
 
-      <ScorecardView card={card} teamName={teamName} />
+      <ScorecardView card={card} teamName={teamName} onEdit={submitted ? undefined : startCorrecting} />
 
       {!submitted && (
         <button onClick={startOver} disabled={resetting} className="text-xs text-muted underline underline-offset-2 disabled:opacity-60">
           {resetting ? "Starting over…" : "Start this match over"}
         </button>
+      )}
+
+      {!submitted && correcting && card.innings[correcting.innings].overs[correcting.over]?.balls[correcting.ball] && (
+        <BallEditor
+          key={`${correcting.innings}-${correcting.over}-${correcting.ball}`}
+          setup={setup}
+          events={events}
+          at={correcting}
+          over={card.innings[correcting.innings].overs[correcting.over]}
+          names={card.innings[correcting.innings].pairs[card.innings[correcting.innings].overs[correcting.over].pair]}
+          team={teamName(card.innings[correcting.innings].battingTeam)}
+          onSave={saveCorrection}
+          onCancel={() => setCorrecting(null)}
+        />
       )}
     </div>
   );
@@ -676,26 +741,21 @@ function TotalsBar({ card, team1, team2 }: { card: Scorecard; team1: string; tea
   );
 }
 
-function OverLine({ over }: { over: OverCard | null }) {
+function OverLine({ over, onEdit }: { over: OverCard | null; onEdit: (ball: number) => void }) {
   if (!over || over.balls.length === 0) return <p className="text-sm text-muted">New over: tap the first ball.</p>;
   return (
     <div>
       <div className="flex flex-wrap gap-1">
         {over.balls.map((b, i) => (
-          <span
+          <button
             key={i}
-            className={`tabular rounded px-2 py-1 text-sm font-medium ${
-              b.t === "out" || ((b.t === "nb" || b.t === "wd") && b.out)
-                ? "bg-danger text-card"
-                : isBoundary(b)
-                  ? "bg-cricket-tint text-cricket ring-1 ring-cricket"
-                  : b.t === "run"
-                    ? "bg-soft"
-                    : "bg-warn-tint text-warn"
-            }`}
+            type="button"
+            onClick={() => onEdit(i)}
+            aria-label={`Change ball ${i + 1}: ${chip(b)}`}
+            className={`tabular min-h-8 min-w-8 rounded px-2 py-1 text-sm font-medium ${chipTone(b)}`}
           >
             {chip(b)}
-          </span>
+          </button>
         ))}
       </div>
       <p className="mt-1 text-xs text-muted">
@@ -1126,9 +1186,283 @@ function PenaltyButton({ team1, team2, onPenalty }: { team1: string; team2: stri
   );
 }
 
-function ScorecardView({ card, teamName }: { card: Scorecard; teamName: (t: 1 | 2) => string }) {
+type BallKind = "legal" | "wd" | "nb" | "db";
+type WicketKind = "none" | "out" | "runout";
+
+/** What's picked in the "Change a ball" sheet. */
+interface BallDraft {
+  kind: BallKind;
+  wicket: WicketKind;
+  /** Side runs 1-3 or a back-net 4 / 6; 0 = none. */
+  bonus: number;
+  /** Runs run, or completed before a run out. */
+  running: number;
+  striker: Striker | null;
+  /** Who was run out. Any other wicket is the striker's. */
+  outWho: Striker | null;
+}
+
+/** The sheet's starting picks: the ball as it was scored. `striker` stands in when the ball had nobody on strike. */
+function draftOf(ball: Ball, striker: Striker | null): BallDraft {
+  if (ball.t === "db") return { kind: "db", wicket: "none", bonus: 0, running: 0, striker, outWho: null };
+  const bonus = ball.t === "wd" ? 0 : (ball.bonus ?? 0);
+  const running = ball.t === "wd" ? 0 : (ball.runs ?? 0) - bonus;
+  const wicket: WicketKind = !isWicket(ball) ? "none" : isRunOut(ball) ? "runout" : "out";
+  const outWho =
+    wicket === "runout" && ball.striker !== undefined ? ((ball.t !== "run" && ball.nonStriker ? 1 - ball.striker : ball.striker) as Striker) : null;
+  return { kind: ball.t === "run" || ball.t === "out" ? "legal" : ball.t, wicket, bonus, running, striker: ball.striker ?? striker, outWho };
+}
+
+/** Drop picks that don't go together: no catch off a no-ball, no back-net boundary with a run out. */
+function tidy(d: BallDraft): BallDraft {
+  const wicket = d.kind === "db" || (d.kind === "nb" && d.wicket === "out") ? "none" : d.wicket;
+  return { ...d, wicket, bonus: wicket === "runout" && BACK_NET.includes(d.bonus) ? 0 : d.bonus, outWho: wicket === "runout" ? d.outWho : null };
+}
+
+/** The ball the picks describe, built the way the scoring buttons build it. Null while something is still to pick. */
+function ballOf(d: BallDraft): Ball | null {
+  if (d.kind === "db") return { t: "db" };
+  if (d.kind === "wd" && d.wicket === "none") return { t: "wd" };
+  if (d.striker === null || (d.wicket === "runout" && d.outWho === null)) return null;
+  const striker = d.striker;
+  const otherEnd = d.wicket === "runout" && d.outWho !== striker ? { nonStriker: true as const } : {};
+  if (d.kind === "wd") return { t: "wd", out: true, striker, ...(d.wicket === "runout" ? { runOut: true as const } : {}), ...otherEnd };
+  if (d.kind === "legal" && d.wicket === "out") return { t: "out", striker };
+  const offBat = { runs: d.bonus + (BACK_NET.includes(d.bonus) ? 0 : d.running), striker, ...(d.bonus ? { bonus: d.bonus } : {}) };
+  if (d.kind === "nb") return d.wicket === "runout" ? { t: "nb", out: true, ...offBat, ...otherEnd } : { t: "nb", ...offBat };
+  return d.wicket === "runout" ? { t: "out", runOut: true, ...offBat, ...otherEnd } : { t: "run", ...offBat };
+}
+
+const BALL_KINDS: { kind: BallKind; label: string }[] = [
+  { kind: "legal", label: "Normal" },
+  { kind: "wd", label: "Wide" },
+  { kind: "nb", label: "No-ball" },
+  { kind: "db", label: "Dead ball" },
+];
+
+function Pick({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={on}
+      className={`min-h-11 min-w-0 rounded-md border px-1.5 text-sm font-medium ${on ? "border-accent bg-accent text-white" : "border-line bg-soft"}`}
+    >
+      <span className="block truncate">{children}</span>
+    </button>
+  );
+}
+
+/**
+ * Correct a ball that's already on the scorecard, in any over, without undoing what came after it.
+ * The picks are checked as they're made, so a change that can't be saved says why before Save.
+ */
+function BallEditor({
+  setup,
+  events,
+  at,
+  over,
+  names,
+  team,
+  onSave,
+  onCancel,
+}: {
+  setup: ScoringSetup;
+  events: ScoreEvent[];
+  at: BallAt;
+  over: OverCard;
+  names: PairNames | null;
+  /** The batting team's name. */
+  team: string;
+  onSave: (at: BallAt, was: Ball, now: Ball, events: ScoreEvent[]) => void;
+  onCancel: () => void;
+}) {
+  const was = over.balls[at.ball];
+  // A female over has one batter on strike throughout: a ball that had nobody (a wide, a dead ball) starts on her.
+  const faced = over.female ? over.balls.find((b) => b.t !== "db" && b.striker !== undefined) : undefined;
+  const [start] = useState(() => draftOf(was, faced && faced.t !== "db" ? (faced.striker ?? null) : null));
+  const [draft, setDraft] = useState(start);
+  const set = (patch: Partial<BallDraft>) => setDraft((d) => tidy({ ...d, ...patch }));
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
+  const now = ballOf(draft);
+  const changed = now !== null && JSON.stringify(now) !== JSON.stringify(ballOf(start));
+  const result = now ? correctBall(setup, events, at, now) : null;
+  const total = result?.ok ? replay(setup, result.events).innings[at.innings].overs[at.over].total : null;
+
+  const showRuns = draft.kind === "nb" || (draft.kind === "legal" && draft.wicket !== "out");
+  const showStriker = draft.kind === "legal" || draft.kind === "nb" || (draft.kind === "wd" && draft.wicket !== "none");
+  const bonuses = [0, ...SIDE_VALUES, ...(draft.wicket === "runout" ? [] : BOUNDARY_VALUES)];
+  const runs = RUN_BUTTONS.includes(draft.running) ? RUN_BUTTONS : [...RUN_BUTTONS, draft.running];
+  const wickets: { wicket: WicketKind; label: string }[] =
+    draft.kind === "db"
+      ? []
+      : [
+          { wicket: "none", label: "No wicket" },
+          ...(draft.kind === "nb" ? [] : [{ wicket: "out" as const, label: draft.kind === "wd" ? "Stumped" : "Out" }]),
+          { wicket: "runout", label: "Run out" },
+        ];
+  const batter = (i: number) => names?.[i] ?? `Batter ${i + 1}`;
+  const label = "mb-1 text-xs text-muted";
+
+  return (
+    <div className="fixed inset-0 z-30 flex items-end justify-center bg-black/50" onClick={onCancel}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Change a ball"
+        onClick={(e) => e.stopPropagation()}
+        className="max-h-[92dvh] w-full max-w-md space-y-3 overflow-y-auto rounded-t-xl border border-line bg-card p-4 shadow-lg"
+      >
+        <div>
+          <h2 className="font-display text-xl font-semibold leading-none">Change a ball</h2>
+          <p className="mt-1.5 text-sm text-muted">
+            {team} · over {at.over + 1}, ball {at.ball + 1}
+            {over.female && " · female over"}
+            {over.bowler && ` · bowled by ${over.bowler}`}
+          </p>
+          <p className="mt-1.5 text-sm">
+            Scored as <span className={`tabular rounded px-2 py-0.5 font-medium ${chipTone(was)}`}>{chip(was)}</span>
+          </p>
+        </div>
+
+        <div role="group" aria-label="Type of ball">
+          <p className={label}>Type of ball</p>
+          <div className="grid grid-cols-4 gap-2">
+            {BALL_KINDS.map((k) => (
+              <Pick key={k.kind} on={draft.kind === k.kind} onClick={() => set({ kind: k.kind })}>
+                {k.label}
+              </Pick>
+            ))}
+          </div>
+        </div>
+
+        {wickets.length > 0 && (
+          <div role="group" aria-label="Wicket">
+            <p className={label}>Wicket (−5)</p>
+            <div className={`grid gap-2 ${wickets.length === 3 ? "grid-cols-3" : "grid-cols-2"}`}>
+              {wickets.map((w) => (
+                <Pick key={w.wicket} on={draft.wicket === w.wicket} onClick={() => set({ wicket: w.wicket })}>
+                  {w.label}
+                </Pick>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {showRuns && (
+          <>
+            <div role="group" aria-label="Side runs or boundary">
+              <p className={label}>{draft.wicket === "runout" ? "Side runs · nets & posts" : "Side runs (1–3) or back-net boundary (4, 6)"}</p>
+              <div className={`grid gap-2 ${bonuses.length === 6 ? "grid-cols-6" : "grid-cols-4"}`}>
+                {bonuses.map((value) => (
+                  <Pick key={value} on={draft.bonus === value} onClick={() => set({ bonus: value })}>
+                    {value === 0 ? "None" : value}
+                  </Pick>
+                ))}
+              </div>
+            </div>
+            {BACK_NET.includes(draft.bonus) ? (
+              <p className="text-xs text-muted">A back-net {draft.bonus} is the whole ball: nothing is added for running.</p>
+            ) : (
+              <div role="group" aria-label={draft.wicket === "runout" ? "Runs completed" : "Runs run"}>
+                <p className={label}>{draft.wicket === "runout" ? "Runs completed before the run out" : "Runs run"}</p>
+                <div className="grid grid-cols-6 gap-2">
+                  {runs.map((r) => (
+                    <Pick key={r} on={draft.running === r} onClick={() => set({ running: r })}>
+                      {draft.bonus ? `${draft.bonus}+${r}` : r}
+                    </Pick>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {showStriker && (
+          <div role="group" aria-label="On strike">
+            <p className={label}>On strike</p>
+            <div className="grid grid-cols-2 gap-2">
+              {([0, 1] as const).map((i) => (
+                <Pick key={i} on={draft.striker === i} onClick={() => set({ striker: i })}>
+                  {batter(i)}
+                </Pick>
+              ))}
+            </div>
+            {over.female && <p className="mt-1 text-xs text-muted">Female over: one batter faces every ball, so this changes the whole over.</p>}
+          </div>
+        )}
+
+        {draft.wicket === "runout" && (
+          <div role="group" aria-label="Who was run out">
+            <p className={label}>Who was run out</p>
+            <div className="grid grid-cols-2 gap-2">
+              {([0, 1] as const).map((i) => (
+                <Pick key={i} on={draft.outWho === i} onClick={() => set({ outWho: i })}>
+                  {batter(i)}
+                </Pick>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div aria-live="polite" className="min-h-10 text-sm">
+          {now === null ? (
+            <p className="text-warn">{draft.striker === null ? "Pick who was on strike." : "Pick who was run out."}</p>
+          ) : result && !result.ok ? (
+            <p className="text-loss">{result.error}</p>
+          ) : changed ? (
+            <p>
+              Now <span className={`tabular rounded px-2 py-0.5 font-medium ${chipTone(now)}`}>{chip(now)}</span>
+              {strikerOf(now) !== undefined && strikerOf(now) !== strikerOf(ballOf(start)) && ` · ${batter(strikerOf(now)!)} on strike`}
+              <span className="text-muted">
+                {" "}
+                · over {at.over + 1} total {over.total} → {total}
+              </span>
+            </p>
+          ) : (
+            <p className="text-muted">Nothing changed yet.</p>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <button type="button" onClick={onCancel} className="rounded-md border border-line py-2.5 text-sm">
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => now && result?.ok && onSave(at, was, now, result.events)}
+            disabled={!changed || !result?.ok}
+            className="rounded-md bg-accent py-2.5 font-medium text-white hover:bg-accent-hover disabled:opacity-50"
+          >
+            Save change
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ScorecardView({
+  card,
+  teamName,
+  onEdit,
+}: {
+  card: Scorecard;
+  teamName: (t: 1 | 2) => string;
+  /** Set while the match can still be corrected: each ball becomes a button. */
+  onEdit?: (at: BallAt) => void;
+}) {
   return (
     <section className="space-y-3">
+      {onEdit && card.innings[0].overs.length > 0 && <p className="text-xs text-muted">Scored a ball wrong? Tap it here to change it, in any over.</p>}
       {card.innings.map((inn, i) =>
         inn.overs.length === 0 ? null : (
           <div key={i} className="rounded-lg border border-line bg-card p-3 text-sm shadow-sm">
@@ -1145,7 +1479,23 @@ function ScorecardView({ card, teamName }: { card: Scorecard; teamName: (t: 1 | 
                       {o.female && " ♀"}
                     </td>
                     <td className="py-1.5">
-                      {o.balls.map(chip).join(" ")}
+                      {onEdit ? (
+                        <span className="flex flex-wrap gap-1">
+                          {o.balls.map((b, k) => (
+                            <button
+                              key={k}
+                              type="button"
+                              onClick={() => onEdit({ innings: i as 0 | 1, over: o.index, ball: k })}
+                              aria-label={`Change over ${o.index + 1}, ball ${k + 1}: ${chip(b)}`}
+                              className={`min-h-8 min-w-8 rounded px-1.5 font-medium ${chipTone(b)}`}
+                            >
+                              {chip(b)}
+                            </button>
+                          ))}
+                        </span>
+                      ) : (
+                        o.balls.map(chip).join(" ")
+                      )}
                       {o.bowler && <span className="block text-muted">Bowler {o.bowler}</span>}
                     </td>
                     <td className="w-10 py-1.5 text-right font-semibold">{o.total}</td>

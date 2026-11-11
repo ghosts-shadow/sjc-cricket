@@ -3,7 +3,7 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { GenderChips, inGender, LeaderNav, LeaderTable, matches as matching, SearchForm, viewFrom } from "@/components/leaderboard";
 import { requireOrganiser } from "@/lib/auth";
-import { bowlingAverage, bowlingStrikeRate, economy, extrasBowled, rankBy, type BowlingRow, type Column } from "@/lib/leaders";
+import { bowlingAverage, bowlingStrikeRate, economy, extrasBowled, MIN_OVERS, rankBy, type BowlingRow, type Column } from "@/lib/leaders";
 import { getPlayerStats } from "@/lib/stats";
 
 export const metadata: Metadata = { title: "Bowling", robots: { index: false } };
@@ -16,8 +16,6 @@ export default function BowlingPage(props: PageProps<"/admin/bowling">) {
   );
 }
 
-/** The rates need a few overs, or one cheap over tops the list (each bowler bowls one over a match). */
-const MIN_OVERS = 2;
 const enoughOvers = { qualifies: (r: BowlingRow) => r.overs >= MIN_OVERS, minimum: `${MIN_OVERS}+ overs bowled` };
 const rate = (value: number | null) => (value == null ? "–" : value.toFixed(1));
 

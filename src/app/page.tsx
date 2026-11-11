@@ -2,6 +2,7 @@ import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { MatchDays, QualifyKey, SectionTitle, StandingsTable, StatCard } from "@/components/cricket";
+import { LiveNow } from "@/components/live-now";
 import { getTournament, type Tournament } from "@/lib/data";
 import { dayKey, formatLongDay, formatStamp } from "@/lib/format";
 import { GROUPS } from "@/lib/tournament";
@@ -37,6 +38,10 @@ export default async function HomePage() {
           )}
         </div>
       </section>
+
+      <Suspense fallback={null}>
+        <LiveNow matches={tournament.matches} />
+      </Suspense>
 
       <Suspense fallback={<p className="text-sm text-muted">Loading fixtures…</p>}>
         <UpNext tournament={tournament} />

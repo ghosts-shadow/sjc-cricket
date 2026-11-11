@@ -508,9 +508,22 @@ export function defaultStriker(inn: InningsCard, overIndex: number): { striker: 
 }
 
 export function replay(setup: ScoringSetup, events: ScoreEvent[]): Scorecard {
+  return replayPlaced(setup, events).card;
+}
+
+/** Where a ball sits on the scorecard: innings 0-1, over 0-5, and its place in that over's `balls`. */
+export interface BallAt {
+  innings: 0 | 1;
+  over: number;
+  ball: number;
+}
+
+/** replay(), plus where each event's ball landed: null for other events, and for anything after the match ended. */
+function replayPlaced(setup: ScoringSetup, events: ScoreEvent[]): { card: Scorecard; placed: (BallAt | null)[] } {
   const other = (setup.battingFirst === 1 ? 2 : 1) as 1 | 2;
   const innings: [InningsCard, InningsCard] = [newInnings(setup.battingFirst), newInnings(other)];
   const penalties: Scorecard["penalties"] = [];
+  const placed: (BallAt | null)[] = events.map(() => null);
   // Cast so TypeScript doesn't narrow to 0: closeInnings() advances it inside a closure.
   let current = 0 as 0 | 1 | 2;
 
@@ -528,7 +541,7 @@ export function replay(setup: ScoringSetup, events: ScoreEvent[]): Scorecard {
     current = (current + 1) as 0 | 1 | 2;
   };
 
-  for (const event of events) {
+  for (const [at, event] of events.entries()) {
     if (current === 2) break;
     const inn = innings[current];
     switch (event.type) {
@@ -545,6 +558,7 @@ export function replay(setup: ScoringSetup, events: ScoreEvent[]): Scorecard {
         break;
       case "ball": {
         const over = activeOver(inn);
+        placed[at] = { innings: current, over: over.index, ball: over.balls.length };
         Object.assign(over, summariseOver(over.index, over.female, [...over.balls, event.ball], over.bowler));
         if (over.complete && inn.overs.length === OVERS_PER_INNINGS) closeInnings();
         break;
@@ -589,7 +603,90 @@ export function replay(setup: ScoringSetup, events: ScoreEvent[]): Scorecard {
   }
   const target = innings[0].complete ? totals[innings[0].battingTeam] + 1 : null;
 
-  return { innings, current, penalties, totals, target, finished, result, warnings };
+  return { card: { innings, current, penalties, totals, target, finished, result, warnings }, placed };
+}
+
+/** One correction: the ball at this place on the scorecard was really this. */
+export interface BallEdit {
+  at: BallAt;
+  ball: Ball;
+}
+
+export type EditResult = { ok: true; events: ScoreEvent[] } | { ok: false; error: string };
+
+export const EDIT_MOVES_BALLS =
+  "That change would move the balls after it into a different over. Use Undo to go back to that ball instead.";
+
+/** What a correction must leave alone: the over every ball is in, and each over's kind and players. */
+function shape({ card, placed }: { card: Scorecard; placed: (BallAt | null)[] }): string {
+  return JSON.stringify({
+    placed,
+    innings: card.innings.map((inn) => ({ pairs: inn.pairs, overs: inn.overs.map((o) => [o.female, o.bowler]) })),
+  });
+}
+
+/**
+ * Correct balls that were already scored, anywhere in the match, without undoing what came after.
+ * The scorecard is rebuilt from the corrected list, so every total, target and result follows.
+ *
+ * Bowler, batter and female-over events belong to "the over being bowled" when they were entered, so a
+ * correction may not change which over any later ball falls in. Swapping a legal ball for a re-bowled
+ * one (or back) in an over that later overs follow would do that, and is refused: the scorer undoes
+ * back to it instead. In the over still being bowled there's nothing after it to move, so anything goes.
+ */
+export function replaceBalls(setup: ScoringSetup, events: ScoreEvent[], edits: BallEdit[]): EditResult {
+  const before = replayPlaced(setup, events);
+  const next = [...events];
+  for (const { at, ball } of edits) {
+    const index = before.placed.findIndex((p) => p !== null && p.innings === at.innings && p.over === at.over && p.ball === at.ball);
+    const clean = parseEvents([{ type: "ball", ball }]);
+    if (index < 0 || !clean) return { ok: false, error: "That ball can't be changed. Reload the page and try again." };
+    next[index] = clean[0];
+  }
+  if (shape(replayPlaced(setup, next)) !== shape(before)) return { ok: false, error: EDIT_MOVES_BALLS };
+  return { ok: true, events: next };
+}
+
+/**
+ * Correct one ball. In a female over the same batter faces every ball (rules p.5), so a new striker
+ * there goes on the whole over.
+ */
+export function correctBall(setup: ScoringSetup, events: ScoreEvent[], at: BallAt, ball: Ball): EditResult {
+  const edits: BallEdit[] = [{ at, ball }];
+  const over = replay(setup, events).innings[at.innings].overs[at.over] as OverCard | undefined;
+  const striker = ball.t === "db" ? undefined : ball.striker;
+  if (over?.female && striker !== undefined) {
+    over.balls.forEach((other, i) => {
+      if (i !== at.ball && other.t !== "db" && other.striker !== undefined && other.striker !== striker) {
+        edits.push({ at: { ...at, ball: i }, ball: facedBy(other, striker) });
+      }
+    });
+  }
+  return replaceBalls(setup, events, edits);
+}
+
+/** Was a batter out on this ball? */
+export const isWicket = (ball: Ball): boolean => ball.t === "out" || ((ball.t === "nb" || ball.t === "wd") && ball.out === true);
+
+/** A wicket where either batter can be the one out. Any other wicket (caught, bowled, stumped) is the striker's. */
+export function isRunOut(ball: Ball): boolean {
+  if (ball.t === "out") return ball.runOut === true || (ball.runs ?? 0) > 0; // runs completed mean a run out (older data)
+  if (ball.t === "nb") return ball.out === true; // a no-ball wicket can only be a run out
+  return ball.t === "wd" && ball.out === true && ball.runOut === true;
+}
+
+/**
+ * The same ball, faced by this batter. A run out keeps whoever was out; any other wicket goes with the
+ * striker. Plain wides and dead balls have nobody on strike and come back unchanged.
+ */
+export function facedBy(ball: Ball, striker: Striker): Ball {
+  if (ball.t === "db" || (ball.t === "wd" && !ball.out)) return ball;
+  if (ball.t === "run") return { ...ball, striker };
+  const wasOut = isRunOut(ball) && ball.striker !== undefined ? (ball.nonStriker ? 1 - ball.striker : ball.striker) : striker;
+  const next = { ...ball, striker };
+  if (wasOut === striker) delete next.nonStriker;
+  else next.nonStriker = true;
+  return next;
 }
 
 /**

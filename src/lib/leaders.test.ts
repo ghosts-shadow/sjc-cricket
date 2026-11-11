@@ -5,6 +5,7 @@ import {
   bowlingAverage,
   bowlingStrikeRate,
   economy,
+  mvpEconomy,
   mvpScore,
   playerKey,
   rankBy,
@@ -81,6 +82,18 @@ describe("tally", () => {
     expect(named(result.mvp, "Xavier")).toMatchObject({ runs: 6, given: 14, wickets: 1, extras: 1, mvp: -4 }); // 6 - 14 + 5 - 1
     expect(named(result.mvp, "Yara")).toMatchObject({ runs: 0, given: 12, mvp: -6 }); // -12 / 2
     expect(named(result.mvp, "Cara")).toMatchObject({ matches: 1, mvp: 0 });
+  });
+
+  it("carries the overs bowled for the MVP table's economy, which the score doesn't use", () => {
+    expect(named(result.mvp, "Xavier")).toMatchObject({ overs: 1, given: 14 });
+    expect(mvpEconomy(named(result.mvp, "Xavier"))).toBe(14);
+    expect(mvpEconomy(named(result.mvp, "Anil"))).toBe(6);
+    expect(mvpEconomy(named(result.mvp, "Ben"))).toBeNull(); // never bowled
+    expect(mvpEconomy({ given: 21, overs: 2 })).toBe(economy({ runs: 21, overs: 2 }));
+    // Same score with or without the overs: economy is display only.
+    const anil = named(result.mvp, "Anil");
+    const moreOvers = { ...anil, overs: 99 };
+    expect(mvpScore(moreOvers)).toBe(anil.mvp);
   });
 });
 

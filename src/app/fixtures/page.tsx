@@ -3,6 +3,7 @@ import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { GroupBadge, MatchDays, PastToggle } from "@/components/cricket";
+import { LiveNow } from "@/components/live-now";
 import { getTournament } from "@/lib/data";
 import { dayKey } from "@/lib/format";
 import { GROUPS } from "@/lib/tournament";
@@ -45,6 +46,9 @@ async function FilteredFixtures({ searchParams }: { searchParams: PageProps<"/fi
 
   return (
     <>
+      <Suspense fallback={null}>
+        <LiveNow matches={matches} />
+      </Suspense>
       <nav className="flex flex-wrap gap-2" aria-label="Filter fixtures">
         {FILTERS.map((f) => (
           <Link

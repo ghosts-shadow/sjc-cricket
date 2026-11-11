@@ -1,6 +1,9 @@
 import "server-only";
 import { cacheLife, cacheTag } from "next/cache";
 import { prisma } from "./db";
+import { dayKey } from "./format";
+import { liveScore, type LiveScore } from "./live";
+import { parseEvents, parseSetup } from "./scoring";
 import {
   computeStandings,
   matchLabel,
@@ -52,6 +55,49 @@ export async function getTournament(): Promise<Tournament> {
 /** Uncached, for organiser and scorer screens and server actions: always the latest saved result. */
 export async function getTournamentLive(): Promise<Tournament> {
   return loadTournament();
+}
+
+/** A scorer who hasn't saved for this long has stopped: the match drops off the public Live section. */
+const LIVE_STALE_MINUTES = 45;
+
+export interface LiveMatch extends LiveScore {
+  matchNo: number;
+}
+
+/**
+ * Matches being scored right now, as viewers may see them: an over behind the play and team totals
+ * only (see live.ts). The scorer's events hold player names and the overs being held back, so only
+ * the worked-out LiveScore leaves this function.
+ *
+ * Only today's scheduled matches with a recent save count, so a practice or abandoned session never
+ * shows. Cached for a few seconds: however many people are watching, the database is read about once
+ * every 10 seconds per server, and a submitted result clears it through the tag.
+ */
+export async function getLiveScores(): Promise<LiveMatch[]> {
+  "use cache";
+  cacheLife({ stale: 30, revalidate: 10, expire: 60 });
+  cacheTag(TOURNAMENT_TAG);
+
+  const now = new Date();
+  const sessions = await prisma.scoringSession.findMany({
+    where: {
+      submitted: false,
+      updatedAt: { gt: new Date(now.getTime() - LIVE_STALE_MINUTES * 60_000) },
+      match: { status: "SCHEDULED" },
+    },
+    select: { setup: true, events: true, match: { select: { matchNo: true, startsAt: true } } },
+  });
+
+  const today = dayKey(now.toISOString());
+  return sessions
+    .flatMap((session): LiveMatch[] => {
+      if (dayKey(session.match.startsAt.toISOString()) !== today) return [];
+      const setup = parseSetup(session.setup);
+      const events = parseEvents(session.events);
+      if (!setup || !events || !events.some((e) => e.type === "ball")) return [];
+      return [{ matchNo: session.match.matchNo, ...liveScore(setup, events) }];
+    })
+    .sort((a, b) => a.matchNo - b.matchNo);
 }
 
 async function loadTournament(): Promise<Tournament> {

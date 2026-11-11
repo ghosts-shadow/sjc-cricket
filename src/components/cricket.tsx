@@ -1,6 +1,8 @@
 import Link from "next/link";
 import type { MatchView } from "@/lib/data";
 import { dayKey, formatDay, formatLongDay, formatTime, timeChangeText } from "@/lib/format";
+import type { LiveScore } from "@/lib/live";
+import { OVERS_PER_INNINGS } from "@/lib/scoring";
 import { formatNrr, QUALIFIERS_PER_GROUP, type StandingRow, type TeamLite } from "@/lib/tournament";
 
 const GROUP_COLOURS: Record<string, string> = {
@@ -109,6 +111,52 @@ export function MatchCard({ match, showDate = false }: { match: MatchView; showD
           {[line, match.note].filter(Boolean).join(" · ")}
         </p>
       )}
+    </article>
+  );
+}
+
+/** What the Live card says under the scores: where the match has got to, as far as viewers can see. */
+function liveLine(score: LiveScore): string {
+  if (score.awaitingResult) return "Play has finished. The result shows once the scorer confirms it.";
+  const need = score.target != null ? score.target - score.totals[score.batting] : null;
+  const chase = need == null ? null : need > 0 ? `need ${need} more` : `${1 - need} ahead`;
+  return [`Innings ${score.innings}`, `after ${score.overs} of ${OVERS_PER_INNINGS} overs`, chase].filter(Boolean).join(" · ");
+}
+
+/** A match being scored right now, as viewers may see it: an over behind the play, team totals only. */
+export function LiveCard({ match, score }: { match: MatchView; score: LiveScore }) {
+  const sides = [
+    { side: 1 as const, team: match.home, fallback: match.homeLabel },
+    { side: 2 as const, team: match.away, fallback: match.awayLabel },
+  ];
+  return (
+    <article className="rounded-lg border border-line bg-card p-3 shadow-sm">
+      <div className="mb-2 flex items-center gap-1.5 text-xs text-muted">
+        <span className="rounded bg-danger px-1.5 py-0.5 text-[11px] font-semibold leading-none tracking-[.08em] text-card">LIVE</span>
+        {match.group && <GroupBadge group={match.group} />}
+        <span>{match.label}</span>
+      </div>
+      <div className="space-y-1 text-sm">
+        {sides.map(({ side, team, fallback }) => {
+          // Once play has finished nobody is batting, so neither side is picked out.
+          const batting = side === score.batting && !score.awaitingResult;
+          // In the first innings the other side hasn't batted, so it has no score to show yet.
+          const yetToBat = score.innings === 1 && !batting;
+          const weight = batting ? "font-semibold" : score.awaitingResult ? "font-medium" : "font-medium text-muted";
+          return (
+            <div key={side} className="flex items-center justify-between gap-3">
+              <span>
+                <TeamName team={team} fallback={fallback} bold={batting} />
+                {batting && <span className="ml-1.5 text-xs text-muted">batting</span>}
+              </span>
+              <span className={`tabular font-display text-xl leading-none ${weight}`}>
+                {yetToBat ? "–" : score.totals[side]}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <p className="mt-2 border-t border-line pt-2 text-xs text-muted">{liveLine(score)}</p>
     </article>
   );
 }

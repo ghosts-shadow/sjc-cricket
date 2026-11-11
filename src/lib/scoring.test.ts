@@ -2,11 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
   battedAlready,
   bowledAlready,
+  correctBall,
   defaultStriker,
+  EDIT_MOVES_BALLS,
+  facedBy,
   femaleOverPlayers,
+  isRunOut,
+  isWicket,
   namesBySide,
   parseEvents,
   parseSetup,
+  replaceBalls,
   replay,
   summariseOver,
   swapBattingFirst,
@@ -699,5 +705,189 @@ describe("battedAlready", () => {
       { name: "Cara", pair: 2 },
     ]);
     expect(battedAlready(replay({ battingFirst: 1 }, pairOne).innings[1], 0)).toEqual([]);
+  });
+});
+
+describe("replaceBalls: correcting a ball that was already scored", () => {
+  const setup = { battingFirst: 1 as const };
+  const balls = (list: Ball[]): ScoreEvent[] => list.map((ball) => ({ type: "ball", ball }));
+  const bowl = (name: string): ScoreEvent => ({ type: "bowler", name });
+  const pair = (a: string, b: string): ScoreEvent => ({ type: "batters", names: [a, b] });
+  const one: Ball = { t: "run", runs: 1, striker: 0 };
+  const six = balls(times(6, one));
+  const at = (innings: 0 | 1, over: number, ball: number) => ({ innings, over, ball });
+  /** Three overs with names, the third still being bowled. */
+  const threeOvers: ScoreEvent[] = [pair("Anil", "Ben"), bowl("Xavier"), ...six, bowl("Yusuf"), ...six, pair("Cara", "Dev"), bowl("Zed"), ...six.slice(0, 2)];
+  const fixed = (events: ScoreEvent[], edits: Parameters<typeof replaceBalls>[2]) => {
+    const result = replaceBalls(setup, events, edits);
+    if (!result.ok) throw new Error(result.error);
+    return result.events;
+  };
+
+  it("changes one ball in an earlier over; everything scored after it stays where it was", () => {
+    const next = fixed(threeOvers, [{ at: at(0, 0, 2), ball: { t: "run", runs: 3, bonus: 2, striker: 1 } }]);
+    expect(next).toHaveLength(threeOvers.length);
+    expect(next.filter((e, i) => e !== threeOvers[i])).toEqual([{ type: "ball", ball: { t: "run", runs: 3, bonus: 2, striker: 1 } }]);
+    const inn = replay(setup, next).innings[0];
+    expect(inn.overs.map((o) => o.total)).toEqual([8, 6, 2]);
+    expect(inn.overs.map((o) => o.bowler)).toEqual(["Xavier", "Yusuf", "Zed"]);
+    expect(inn.pairs).toEqual([["Anil", "Ben"], ["Cara", "Dev"], null]);
+    expect(inn.batters.find((b) => b.name === "Ben")).toMatchObject({ runs: 3, balls: 1, sideRuns: 2 });
+    // Undo still takes off the last ball, not the correction.
+    expect(replay(setup, next.slice(0, -1)).innings[0].overs.map((o) => o.total)).toEqual([8, 6, 1]);
+  });
+
+  it("a run that was really a wicket: -5 and no run, in an over long finished", () => {
+    const next = fixed(threeOvers, [{ at: at(0, 1, 5), ball: { t: "out", striker: 0 } }]);
+    const inn = replay(setup, next).innings[0];
+    expect(inn.overs[1]).toMatchObject({ total: 0, wickets: 1, legalBalls: 6, complete: true });
+    expect(inn.bowlers.find((b) => b.name === "Yusuf")).toMatchObject({ wickets: 1, runs: 5 });
+    expect(inn.dismissals).toEqual([expect.objectContaining({ over: 1, batter: "Anil", how: "out" })]);
+  });
+
+  it("a first-innings correction made during the chase moves the target", () => {
+    const first = Array.from({ length: 6 }, () => six).flat();
+    const events = [...first, ...six];
+    expect(replay(setup, events).target).toBe(37);
+    const card = replay(setup, fixed(events, [{ at: at(0, 3, 0), ball: { t: "run", runs: 6, bonus: 6, striker: 0 } }]));
+    expect(card.target).toBe(42);
+    expect(card.innings[1].runs).toBe(6);
+    expect(card.current).toBe(1);
+  });
+
+  it("refuses a change that would move later balls into another over, and changes nothing", () => {
+    // Over 1 with a wide in it would need a seventh ball: the first ball of over 2 would slide back.
+    expect(replaceBalls(setup, threeOvers, [{ at: at(0, 0, 2), ball: { t: "wd" } }])).toEqual({ ok: false, error: EDIT_MOVES_BALLS });
+    // The other way: a wide that was really a run ends the over a ball sooner, so its last ball spills forward.
+    const withWide = [bowl("Xavier"), ...balls([wd, ...times(6, one)]), bowl("Yusuf"), ...six];
+    expect(replaceBalls(setup, withWide, [{ at: at(0, 0, 0), ball: one }])).toEqual({ ok: false, error: EDIT_MOVES_BALLS });
+    // Kinds that are re-bowled alike can swap freely.
+    expect(replay(setup, fixed(withWide, [{ at: at(0, 0, 0), ball: { t: "nb", runs: 2, striker: 0 } }])).innings[0].overs[0].total).toBe(9);
+    expect(replay(setup, fixed(withWide, [{ at: at(0, 0, 0), ball: { t: "db" } }])).innings[0].overs[0].total).toBe(6);
+  });
+
+  it("the next over's bowler, picked before its first ball, stays with that over", () => {
+    const events = [bowl("Xavier"), ...six, bowl("Yusuf")];
+    const next = fixed(events, [{ at: at(0, 0, 5), ball: { t: "run", runs: 2, striker: 0 } }]);
+    expect(replay(setup, next).innings[0].overs.map((o) => o.bowler)).toEqual(["Xavier", "Yusuf"]);
+    // Reopening over 1 would hand it to Yusuf.
+    expect(replaceBalls(setup, events, [{ at: at(0, 0, 5), ball: { t: "wd" } }])).toEqual({ ok: false, error: EDIT_MOVES_BALLS });
+  });
+
+  it("in the over still being bowled, any change goes: nothing comes after it", () => {
+    const open = [bowl("Xavier"), ...six.slice(0, 4)];
+    const wider = replay(setup, fixed(open, [{ at: at(0, 0, 1), ball: { t: "wd" } }])).innings[0].overs[0];
+    expect(wider).toMatchObject({ legalBalls: 3, wides: 1, total: 4, complete: false });
+    // The last ball of a just-finished over can be reopened too, and closed again.
+    const reopened = fixed([bowl("Xavier"), ...six], [{ at: at(0, 0, 5), ball: { t: "db" } }]);
+    expect(replay(setup, reopened).innings[0].overs[0].complete).toBe(false);
+    expect(replay(setup, fixed(reopened, [{ at: at(0, 0, 5), ball: one }])).innings[0].overs[0].complete).toBe(true);
+  });
+
+  it("a female-over wide uses up a ball, so there it swaps with a run", () => {
+    const events: ScoreEvent[] = [bowl("Meera"), { type: "female", on: true }, ...six, bowl("Tom"), ...six];
+    const inn = replay(setup, fixed(events, [{ at: at(0, 0, 3), ball: { t: "wd" } }])).innings[0];
+    expect(inn.overs[0]).toMatchObject({ female: true, total: 7, legalBalls: 6, complete: true });
+    expect(inn.overs[1].balls).toHaveLength(6);
+  });
+
+  it("the last ball of the match can be corrected: the result follows, or play goes on", () => {
+    const innings = (ball: Ball) => Array.from({ length: 6 }, () => balls(times(6, ball))).flat();
+    const tie = [...innings(one), ...innings(one)];
+    expect(replay(setup, tie).result).toEqual({ winner: null, margin: 0 });
+    expect(replay(setup, fixed(tie, [{ at: at(1, 5, 5), ball: { t: "run", runs: 2, striker: 0 } }])).result).toEqual({ winner: 2, margin: 1 });
+    const again = replay(setup, fixed(tie, [{ at: at(1, 5, 5), ball: { t: "nb", runs: 0, striker: 0 } }]));
+    expect(again.finished).toBe(false);
+    expect(again.innings[1].overs[5]).toMatchObject({ legalBalls: 5, complete: false });
+  });
+
+  it("takes several corrections together, and none of them if one can't be made", () => {
+    const next = fixed(threeOvers, [
+      { at: at(0, 0, 0), ball: facedBy(one, 1) },
+      { at: at(0, 0, 1), ball: facedBy(one, 1) },
+    ]);
+    expect(replay(setup, next).innings[0].batters.map((b) => `${b.name} ${b.balls}`)).toEqual(["Anil 10", "Ben 2", "Cara 2", "Dev 0"]);
+    const bad = replaceBalls(setup, threeOvers, [
+      { at: at(0, 0, 0), ball: facedBy(one, 1) },
+      { at: at(0, 0, 1), ball: wd },
+    ]);
+    expect(bad.ok).toBe(false);
+  });
+
+  it("refuses a ball that isn't on the card, or isn't a ball; tidies one that's nearly right", () => {
+    expect(replaceBalls(setup, threeOvers, [{ at: at(0, 2, 2), ball: one }]).ok).toBe(false); // not bowled yet
+    expect(replaceBalls(setup, threeOvers, [{ at: at(1, 0, 0), ball: one }]).ok).toBe(false);
+    expect(replaceBalls(setup, threeOvers, [{ at: at(0, 0, 0), ball: { t: "run", runs: -1 } }]).ok).toBe(false);
+    // Side runs can't be more than the ball's runs: dropped, as when a phone saves.
+    const next = fixed(threeOvers, [{ at: at(0, 0, 0), ball: { t: "run", runs: 1, bonus: 3, striker: 0 } }]);
+    expect(next.find((e) => e.type === "ball")).toEqual({ type: "ball", ball: { t: "run", runs: 1, striker: 0 } });
+  });
+});
+
+describe("correctBall: one ball, as the scorer's sheet changes it", () => {
+  const setup = { battingFirst: 1 as const };
+  const balls = (list: Ball[]): ScoreEvent[] => list.map((ball) => ({ type: "ball", ball }));
+  const faced = (striker: 0 | 1, runs = 1): Ball => ({ t: "run", runs, striker });
+  const names: ScoreEvent = { type: "batters", names: ["Priya", "Sam"] };
+  const at = (over: number, ball: number) => ({ innings: 0 as const, over, ball });
+  const fixed = (events: ScoreEvent[], where: ReturnType<typeof at>, ball: Ball) => {
+    const result = correctBall(setup, events, where, ball);
+    if (!result.ok) throw new Error(result.error);
+    return replay(setup, result.events).innings[0];
+  };
+
+  it("female over scored to the wrong batter: changing one ball's striker moves the whole over", () => {
+    // Sam was tapped by mistake; Priya is the female batter. A wide and a dead ball have no striker.
+    const over = [faced(1), wd, faced(1, 2), db, { t: "out", runOut: true, runs: 1, striker: 1 } as Ball, faced(1), faced(1)];
+    const events: ScoreEvent[] = [names, { type: "bowler", name: "Meera" }, { type: "female", on: true }, ...balls(over), { type: "bowler", name: "Tom" }, ...balls(times(6, faced(1)))];
+    expect(femaleOverPlayers(replay(setup, events).innings[0])).toEqual([{ bowler: "Meera", batter: "Sam" }]);
+
+    const inn = fixed(events, at(0, 0), faced(0));
+    expect(femaleOverPlayers(inn)).toEqual([{ bowler: "Meera", batter: "Priya" }]);
+    expect(inn.overs[0].balls.map((b) => ("striker" in b ? b.striker : "-"))).toEqual([0, "-", 0, "-", 0, 0, 0]);
+    // Sam was the one run out, and still is: now at the other end.
+    expect(inn.overs[0].balls[4]).toEqual({ t: "out", runOut: true, runs: 1, striker: 0, nonStriker: true });
+    expect(inn.dismissals).toEqual([expect.objectContaining({ batter: "Sam", how: "run out" })]);
+    // The partner's over is left alone, and so is the score.
+    expect(inn.overs[1].balls.every((b) => b.t === "run" && b.striker === 1)).toBe(true);
+    expect(inn.runs).toBe(replay(setup, events).innings[0].runs);
+  });
+
+  it("in a normal over only the ball itself changes", () => {
+    const events: ScoreEvent[] = [names, ...balls(times(6, faced(0)))];
+    const inn = fixed(events, at(0, 2), faced(1, 3));
+    expect(inn.overs[0].balls.map((b) => (b.t === "run" ? b.striker : "-"))).toEqual([0, 0, 1, 0, 0, 0]);
+    expect(inn.batters.map((b) => `${b.name} ${b.runs} (${b.balls})`)).toEqual(["Priya 5 (5)", "Sam 3 (1)"]);
+  });
+
+  it("a female-over change with no striker in it (a wide, a dead ball) touches nothing else", () => {
+    const events: ScoreEvent[] = [names, { type: "female", on: true }, ...balls(times(6, faced(0)))];
+    expect(fixed(events, at(0, 5), wd).overs[0].balls.slice(0, 5)).toEqual(times(5, faced(0)));
+  });
+});
+
+describe("facedBy / isWicket / isRunOut", () => {
+  it("moves a ball off the bat to the other batter; wides and dead balls have nobody on strike", () => {
+    expect(facedBy({ t: "run", runs: 3, bonus: 2, striker: 0 }, 1)).toEqual({ t: "run", runs: 3, bonus: 2, striker: 1 });
+    expect(facedBy({ t: "nb", runs: 1, striker: 1 }, 0)).toEqual({ t: "nb", runs: 1, striker: 0 });
+    expect(facedBy(wd, 1)).toEqual({ t: "wd" });
+    expect(facedBy(db, 1)).toEqual({ t: "db" });
+  });
+
+  it("a catch or a stumping goes with the striker; a run out keeps whoever was out", () => {
+    expect(facedBy({ t: "out", striker: 0 }, 1)).toEqual({ t: "out", striker: 1 });
+    expect(facedBy({ t: "wd", out: true, striker: 0 }, 1)).toEqual({ t: "wd", out: true, striker: 1 });
+    // Batter 0 was run out while facing: with batter 1 facing, batter 0 is out at the other end.
+    expect(facedBy({ t: "out", runOut: true, runs: 1, striker: 0 }, 1)).toEqual({ t: "out", runOut: true, runs: 1, striker: 1, nonStriker: true });
+    // Batter 1 was run out at the other end: now they faced it, and are still the one out.
+    expect(facedBy({ t: "nb", runs: 2, out: true, striker: 0, nonStriker: true }, 1)).toEqual({ t: "nb", runs: 2, out: true, striker: 1 });
+    expect(facedBy({ t: "wd", out: true, runOut: true, striker: 1 }, 0)).toEqual({ t: "wd", out: true, runOut: true, striker: 0, nonStriker: true });
+  });
+
+  it("tells wickets from other balls, and run outs from other wickets", () => {
+    const wickets: Ball[] = [out, { t: "out", runOut: true }, { t: "out", runs: 2 }, { t: "nb", runs: 0, out: true }, { t: "wd", out: true }, { t: "wd", out: true, runOut: true }];
+    expect(wickets.map(isWicket)).toEqual([true, true, true, true, true, true]);
+    expect([run(1), nb(2), wd, db].map(isWicket)).toEqual([false, false, false, false]);
+    expect(wickets.map(isRunOut)).toEqual([false, true, true, true, false, true]);
   });
 });

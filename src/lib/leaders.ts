@@ -54,6 +54,7 @@ export interface MvpRow extends Player {
   runs: number; // scored, off the bat
   outs: number;
   given: number; // runs conceded in their overs
+  overs: number; // overs bowled: what economy divides the runs given by. Not part of the MVP score.
   wickets: number;
   extras: number; // wides + no-balls + dead balls they bowled, counted
   mvp: number;
@@ -75,6 +76,12 @@ export const battingStrikeRate = (r: { runs: number; balls: number }) => (r.ball
 
 /** Runs conceded per over bowled. */
 export const economy = (r: { runs: number; overs: number }) => (r.overs ? r.runs / r.overs : 0);
+
+/** The same economy on the MVP table, where runs conceded are "given"; null for a player who never bowled. */
+export const mvpEconomy = (r: { given: number; overs: number }) => (r.overs ? economy({ runs: r.given, overs: r.overs }) : null);
+
+/** A bowling rate needs a few overs, or one cheap over tops the list (each bowler bowls one over a match). */
+export const MIN_OVERS = 2;
 
 /** Runs conceded per wicket; null with no wickets. */
 export const bowlingAverage = (r: { runs: number; wickets: number }) => (r.wickets ? r.runs / r.wickets : null);
@@ -176,6 +183,7 @@ export function tally(cards: PlayedCard[], female: ReadonlySet<string>): Tally {
       runs: bat?.runs ?? 0,
       outs: bat?.outs ?? 0,
       given: bowl?.runs ?? 0,
+      overs: bowl?.overs ?? 0,
       wickets: bowl?.wickets ?? 0,
       extras: bowl ? extrasBowled(bowl) : 0,
     };
